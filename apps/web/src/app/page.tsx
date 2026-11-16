@@ -52,6 +52,7 @@ const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
 type Track = {
   id: string | number;
+  artistProfileId?: string;
   title: string;
   artist: string;
   cover: string;
@@ -560,10 +561,11 @@ export default function HomePage() {
   const loadUploads = useCallback(async () => {
     try {
       const saved = await request<
-        (Track & { artistName: string; audioUrl: string; coverUrl?: string | null })[]
+        (Track & { artistName: string; artistId: string; audioUrl: string; coverUrl?: string | null })[]
       >("/tracks");
       setUploadedTracks(saved.map((track) => ({
         id: track.id,
+        artistProfileId: track.artistId,
         title: track.title,
         artist: track.artistName,
         cover: track.coverUrl ? `${API}${track.coverUrl}` : "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=400&h=400&fit=crop",
@@ -1497,10 +1499,25 @@ export default function HomePage() {
           <div className="topbar-actions">
             {user ? (
               <div className="account-wrap">
-                {user.role === "ARTIST" && <a className="artist-toolbar" href={`/artist/${encodeURIComponent(user.id)}`}><Users size={15} /> Artist profile</a>}
-                {user.role === "ARTIST" && <button className="artist-toolbar" onClick={() => document.getElementById("ticket-sales")?.scrollIntoView({ behavior: "smooth" })}><ScanLine size={15} /> Ticket sales</button>}
-                {user.role === "ARTIST" && <button className="artist-toolbar" onClick={openUploadWizard}><Upload size={15} /> Upload</button>}
-                <div className="account-chip"><span className="avatar">{user.name.slice(0, 1).toUpperCase()}</span><span className="account-name">{user.name.split(" ")[0]}</span><ChevronDown size={14} /></div>
+                {user.role === "ARTIST" && <details className="artist-studio-menu">
+                  <summary className="artist-studio-trigger">
+                    <span className="artist-studio-icon"><AudioLines size={16} /></span>
+                    <span className="artist-studio-copy"><strong>Artist studio</strong><small>Manage your music</small></span>
+                    <ChevronDown className="artist-studio-chevron" size={14} />
+                  </summary>
+                  <div className="artist-studio-dropdown">
+                    <a href={`/artist/${encodeURIComponent(user.id)}`} onClick={(event) => event.currentTarget.closest("details")?.removeAttribute("open")}>
+                      <Users size={16} /><span><strong>Profile &amp; audience</strong><small>Fans, listens, and cities</small></span><ArrowRight size={14} />
+                    </a>
+                    <button onClick={(event) => { event.currentTarget.closest("details")?.removeAttribute("open"); document.getElementById("ticket-sales")?.scrollIntoView({ behavior: "smooth" }); }}>
+                      <ScanLine size={16} /><span><strong>Ticket sales</strong><small>Bookings and check-in</small></span><ArrowRight size={14} />
+                    </button>
+                    <button onClick={(event) => { event.currentTarget.closest("details")?.removeAttribute("open"); openUploadWizard(); }}>
+                      <Upload size={16} /><span><strong>Upload release</strong><small>Share a new track</small></span><ArrowRight size={14} />
+                    </button>
+                  </div>
+                </details>}
+                <div className="account-chip"><span className="avatar">{user.name.slice(0, 1).toUpperCase()}</span><span className="account-name">{user.name.split(" ")[0]}</span></div>
                 <button className="icon-btn logout-btn" aria-label="Sign out" onClick={logout}><LogOut size={16} /></button>
               </div>
             ) : (
@@ -1612,7 +1629,10 @@ export default function HomePage() {
                 return <div className={`track-row ${isCurrent ? "track-current" : ""}`} key={track.id}>
                   <span className="track-index">{isCurrent && playing ? <AudioLines size={15} /> : String(index + 1).padStart(2, "0")}</span>
                   <button className="track-art-button" aria-label={`${isCurrent && playing ? "Pause" : "Play"} ${track.title}`} onClick={() => toggleTrack(track)}><Cover src={track.cover} alt={`${track.title} cover`} /><span className="track-overlay">{isCurrent && playing ? <Pause size={15} fill="currentColor" /> : <Play size={15} fill="currentColor" />}</span></button>
-                  <button className="track-title" onClick={() => toggleTrack(track)}><strong>{track.title}</strong><span>{track.artist}</span></button>
+                  <div className="track-title-with-profile">
+                    <button className="track-title" onClick={() => toggleTrack(track)}><strong>{track.title}</strong><span>{track.artist}</span></button>
+                    {track.artistProfileId && <a className="track-profile-link" href={`/artist/${encodeURIComponent(track.artistProfileId)}`} aria-label={`View ${track.artist} artist profile`} title={`View ${track.artist} artist profile`}><Users size={13} /><span>Profile</span></a>}
+                  </div>
                   <span className="track-album">{track.album ?? "Your next favorite"}</span>
                   <button className={`track-heart ${isCurrent ? "hearted" : ""}`} aria-label={`Add ${track.title} to favorites`} onClick={() => showMessage("Saved to your favorites. Good choice.")}><Heart size={16} /></button>
                   <span className="track-duration">{formatTime(track.duration)}</span>
