@@ -1,0 +1,161 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         String   @default("LISTENER")
+  artistVerifiedAt DateTime?
+  createdAt    DateTime @default(now())
+  tracks       Track[]
+  events       Event[]
+  orders       TicketOrder[]
+  bankAccount  ArtistBankAccount?
+  followers    ArtistFollow[] @relation("ArtistFollowers")
+  following    ArtistFollow[] @relation("ListenerFollowing")
+  listens      TrackListen[]
+}
+
+model ArtistBankAccount {
+  id                    String   @id @default(cuid())
+  provider              String   @default("PAYSTACK")
+  status                String   @default("CREATING")
+  providerCustomerCode  String?  @unique
+  bankName              String?
+  accountNumber         String?
+  accountName           String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  artistId              String   @unique
+  artist                User     @relation(fields: [artistId], references: [id], onDelete: Cascade)
+}
+
+model Track {
+  id          String   @id @default(cuid())
+  title       String
+  artistName  String
+  audioUrl    String
+  coverUrl    String?
+  genre       String   @default("Other")
+  releaseType String   @default("SINGLE")
+  albumTitle  String?
+  releaseDescription String?
+  auphonicProductionId String?
+  aiProductionStatus String?
+  enhancedAudioUrl String?
+  duration    Int?
+  createdAt   DateTime @default(now())
+  artistId    String
+  artist      User     @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  listens     TrackListen[]
+
+  @@index([artistId, createdAt])
+}
+
+model ArtistFollow {
+  id         String   @id @default(cuid())
+  artistId   String
+  listenerId String
+  createdAt  DateTime @default(now())
+  artist     User     @relation("ArtistFollowers", fields: [artistId], references: [id], onDelete: Cascade)
+  listener   User     @relation("ListenerFollowing", fields: [listenerId], references: [id], onDelete: Cascade)
+
+  @@unique([artistId, listenerId])
+  @@index([artistId])
+  @@index([listenerId])
+}
+
+model TrackListen {
+  id        String   @id @default(cuid())
+  trackId   String
+  userId    String
+  playbackId String  @unique
+  city      String?
+  createdAt DateTime @default(now())
+  track     Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  listener  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([trackId, createdAt])
+}
+
+model Event {
+  id          String   @id @default(cuid())
+  title       String
+  artistName  String
+  venue       String
+  city        String
+  startsAt    DateTime
+  priceCents  Int
+  capacity    Int
+  ticketsSold Int      @default(0)
+  coverUrl    String?
+  createdAt   DateTime @default(now())
+  artistId    String
+  artist      User     @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  orders      TicketOrder[]
+  ticketCategories TicketCategory[]
+
+  @@index([startsAt])
+  @@index([artistId])
+}
+
+model TicketCategory {
+  id          String   @id @default(cuid())
+  name        String
+  priceCents  Int
+  capacity    Int
+  ticketsSold Int      @default(0)
+  eventId     String
+  event       Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  orders      TicketOrder[]
+
+  @@unique([eventId, name])
+  @@index([eventId])
+}
+
+model TicketOrder {
+  id            String   @id @default(cuid())
+  quantity      Int
+  totalCents    Int
+  platformFeeCents Int   @default(0)
+  paymentMethod String   @default("PAYSTACK_BANK_TRANSFER")
+  paymentStatus String   @default("PENDING")
+  paymentReference String? @unique
+  paystackCustomerCode String? @unique
+  paystackTransactionReference String? @unique
+  transferBankName String?
+  transferAccountNumber String?
+  transferAccountName String?
+  createdAt     DateTime @default(now())
+  confirmedAt   DateTime?
+  ticketsIssuedAt DateTime?
+  userId        String
+  eventId       String
+  categoryId    String?
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  event         Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  category      TicketCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  tickets       Ticket[]
+
+  @@index([userId])
+  @@index([eventId])
+}
+
+model Ticket {
+  id          String      @id @default(cuid())
+  code        String      @unique
+  issuedAt    DateTime    @default(now())
+  checkedInAt DateTime?
+  orderId     String
+  order       TicketOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+}

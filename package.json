@@ -1,0 +1,17 @@
+{
+  "name": "sonora",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/web",
+    "apps/api"
+  ],
+  "scripts": {
+    "dev": "npm run db:push --workspace @sonora/api && concurrently -k -n api,web -c magenta,cyan \"npm run start:dev --workspace @sonora/api\" \"npm run dev --workspace @sonora/web\"",
+    "build": "npm run build --workspace @sonora/api && npm run build --workspace @sonora/web",
+    "db:push": "npm run db:push --workspace @sonora/api"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
