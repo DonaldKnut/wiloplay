@@ -1,21 +1,25 @@
 body{background:var(--bg);color:var(--ink)}
-.sidebar{background:radial-gradient(ellipse at 0 0,rgba(131,217,87,.07),transparent 36%),#0b100c;border-color:rgba(131,217,87,.12);box-shadow:10px 0 36px #0000001c}
+.sidebar{background:radial-gradient(ellipse at 0 0,rgba(131,217,87,.09),transparent 38%),radial-gradient(ellipse at 100% 100%,rgba(72,125,61,.06),transparent 38%),#0b100c;border-color:rgba(131,217,87,.14);box-shadow:10px 0 36px #0000001c}
 .brand{color:#f0f7ef}
 .brand-mark,.signup-btn,.player-play,.form-submit{background:linear-gradient(135deg,#b5ff72,#78d84e);color:#10170f}
 .brand-mark{box-shadow:0 4px 16px #83d95735;transition:box-shadow .22s,transform .22s}
 .brand:hover .brand-mark{box-shadow:0 5px 22px #83d95765;transform:rotate(-7deg) scale(1.06)}
 .brand-dot{color:var(--green)}
 .nav-caption,.section-kicker{color:#819187}
-.nav-link{color:#a6b0a7}
-.nav-link{border:1px solid transparent;border-radius:10px;position:relative;transition:background .2s,border-color .2s,color .2s,transform .2s}
-.nav-link:hover{background:#17231a;border-color:#263c28;color:#c7ff9c;transform:translateX(3px)}
-.nav-link.active{background:linear-gradient(105deg,#1d2c20,#142017);border-color:#2d442e;color:var(--green);box-shadow:inset 0 1px #ffffff08,0 5px 16px #00000018}
-.nav-link.active:before{background:linear-gradient(180deg,#c1ff93,#78d84e);border-radius:0 4px 4px 0;content:"";height:19px;left:-1px;position:absolute;top:50%;transform:translateY(-50%);width:3px}
+.side-nav{gap:6px}
+.nav-link{border:1px solid transparent;border-radius:11px;color:#a6b0a7;min-height:42px;overflow:hidden;padding:10px 12px;position:relative;transition:background .2s,border-color .2s,box-shadow .2s,color .2s,transform .2s}
+.nav-link:hover{background:linear-gradient(100deg,#17251a,#121b14);border-color:#2b402d;color:#d0ffad;transform:translateX(3px)}
+.nav-link.active{background:linear-gradient(105deg,#203123,#152119);border-color:#345238;color:#c1ff93;box-shadow:inset 0 1px #ffffff0c,0 6px 18px #00000025}
+.nav-link:before{background:linear-gradient(180deg,#c1ff93,#78d84e);border-radius:0 4px 4px 0;content:"";height:20px;left:-1px;opacity:0;position:absolute;top:50%;transform:translate(-3px,-50%) scaleY(.6);transition:opacity .2s,transform .2s;width:3px}
+.nav-link.active:before{box-shadow:0 0 12px #83d95775;opacity:1;transform:translate(0,-50%) scaleY(1)}
+.nav-link.active:after{background:radial-gradient(ellipse at 100% 50%,#83d95712,transparent 62%);content:"";inset:0;pointer-events:none;position:absolute}
 .nav-link svg{transition:filter .2s,transform .2s}
 .nav-link:hover svg{transform:scale(1.1)}
 .nav-link.active svg{filter:drop-shadow(0 0 5px #83d95780)}
 .nav-link.active-sub,.library-link:hover,.sidebar-artist,.text-link,.browse-more,.ticket-button,.modal-switch button{color:var(--green)}
-.nav-new{background:#20311d;border:1px solid #395c31;color:#b5ff72;letter-spacing:.45px}
+.nav-new{align-items:center;background:#20311d;border:1px solid #395c31;border-radius:999px;color:#b5ff72;display:inline-flex;font-size:7px;gap:5px;letter-spacing:.55px;padding:3px 7px}
+.nav-new:before{animation:nav-dot-pulse 2s ease-out infinite;background:#b5ff72;border-radius:50%;box-shadow:0 0 7px #b5ff7280;content:"";height:4px;width:4px}
+@keyframes nav-dot-pulse{50%{box-shadow:0 0 0 4px #b5ff7212,0 0 9px #b5ff72a0}}
 .sidebar-rule,.sidebar-footer{border-color:var(--line)}
 .library-link,.sidebar-note span,.sidebar-footer{color:#849187}
 .sidebar-note,.top-arrow,.artist-toolbar,.ticket-button,.events-empty{background:#151e17}
@@ -23,8 +27,9 @@ body{background:var(--bg);color:var(--ink)}
 .topbar{background:rgba(8,12,9,.78);border-color:#243128;box-shadow:0 9px 28px #00000020;isolation:isolate}
 .topbar:after{background:linear-gradient(90deg,transparent,#83d95740 48%,transparent);bottom:-1px;content:"";height:1px;left:5%;position:absolute;right:5%;z-index:-1}
 .icon-btn,.login-btn,.account-chip,.source-note svg{color:#9aa79d}
-.icon-btn:hover{background:#1b271e;color:var(--green)}
-.search-box{background:#111912;border-color:#202e22;color:#9aa79d;transition:background .2s,border-color .2s,box-shadow .2s,transform .2s}
+.icon-btn{border-radius:50%;transition:background .2s,color .2s,transform .2s}
+.icon-btn:hover{background:#1b271e;color:var(--green);transform:translateY(-1px)}
+.search-box{background:#111912;border-color:#202e22;border-radius:999px;color:#9aa79d;height:40px;transition:background .2s,border-color .2s,box-shadow .2s,transform .2s}
 .search-box:hover{border-color:#38533a}
 .search-box:focus-within,.search-focused:focus-within{background:#101712;border-color:#5a8b48;box-shadow:0 0 0 3px #83d95716,0 7px 22px #00000029;transform:translateY(-1px)}
 .search-box input{color:var(--ink)}
@@ -32,6 +37,9 @@ body{background:var(--bg);color:var(--ink)}
 .login-btn{transition:color .18s,transform .18s}
 .login-btn:hover{color:#c1ff93;transform:translateY(-1px)}
 .signup-btn{box-shadow:0 5px 16px #83d95720;transition:box-shadow .2s,transform .2s}
+.topbar .signup-btn{border-radius:999px;padding:10px 16px}
+.account-chip{background:#111a13;border:1px solid #26382a;border-radius:999px;padding:4px 11px 4px 4px;transition:border-color .2s,background .2s}
+.account-chip:hover{background:#162219;border-color:#3a593d}
 .signup-btn:hover,.player-play:hover,.form-submit:hover:not(:disabled){background:linear-gradient(135deg,#c7ff9c,#8ce866);box-shadow:0 7px 20px #83d95738;transform:translateY(-1px)}
 .artist-toolbar{color:var(--green)}
 .hero{background:#101a12}
