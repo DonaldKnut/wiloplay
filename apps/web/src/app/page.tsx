@@ -460,6 +460,9 @@ export default function HomePage() {
   const [listenCity, setListenCity] = useState("");
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
+  const [activeNav, setActiveNav] = useState<
+    "home" | "discovery" | "for-you" | "shows" | "my-tickets"
+  >("home");
   const [modal, setModal] = useState<Modal>(null);
   const [authMode, setAuthMode] = useState<"login" | "signup">("signup");
   const [authDraft, setAuthDraft] = useState({ name: "", email: "", password: "" });
@@ -477,6 +480,32 @@ export default function HomePage() {
   const artistDetailsRequestId = useRef(0);
   const countedListenTrackId = useRef<string | null>(null);
   const listenPlaybackId = useRef("");
+
+  useEffect(() => {
+    const sectionIds: (typeof activeNav)[] = [
+      "discovery",
+      "for-you",
+      "shows",
+      "my-tickets",
+    ];
+    const updateActiveNav = () => {
+      const activationLine = window.innerHeight * 0.32;
+      let nextSection: typeof activeNav = "home";
+
+      for (const id of sectionIds) {
+        const section = document.getElementById(id);
+        if (section && section.getBoundingClientRect().top <= activationLine) {
+          nextSection = id;
+        }
+      }
+
+      setActiveNav((current) => current === nextSection ? current : nextSection);
+    };
+
+    updateActiveNav();
+    window.addEventListener("scroll", updateActiveNav, { passive: true });
+    return () => window.removeEventListener("scroll", updateActiveNav);
+  }, []);
 
   const loadEvents = useCallback(async () => {
     try {
@@ -1462,11 +1491,11 @@ export default function HomePage() {
         </a>
         <div className="nav-caption">YOUR SPACE</div>
         <nav className="side-nav" aria-label="Main navigation">
-          <a className="nav-link active" href="#home" onClick={() => setMobileNav(false)}><Home size={17} />Home</a>
-          <button className={`nav-link ${searchOpen ? "active-sub" : ""}`} onClick={() => { setSearchOpen(true); setMobileNav(false); document.getElementById("discovery")?.scrollIntoView({ behavior: "smooth" }); }}><Compass size={17} />Discover</button>
-          <a className="nav-link" href="#for-you" onClick={() => setMobileNav(false)}><Heart size={17} />Made for you</a>
-          <a className="nav-link" href="#shows" onClick={() => setMobileNav(false)}><Ticket size={17} />Live shows<span className="nav-new">NEW</span></a>
-          <a className="nav-link" href="#my-tickets" onClick={() => setMobileNav(false)}><QrCode size={17} />My tickets</a>
+          <a className={`nav-link ${activeNav === "home" ? "active" : ""}`} aria-current={activeNav === "home" ? "location" : undefined} href="#home" onClick={() => setMobileNav(false)}><Home size={17} />Home</a>
+          <button className={`nav-link ${activeNav === "discovery" ? "active" : ""}`} aria-current={activeNav === "discovery" ? "location" : undefined} onClick={() => { setActiveNav("discovery"); setSearchOpen(true); setMobileNav(false); document.getElementById("discovery")?.scrollIntoView({ behavior: "smooth" }); }}><Compass size={17} />Discover</button>
+          <a className={`nav-link ${activeNav === "for-you" ? "active" : ""}`} aria-current={activeNav === "for-you" ? "location" : undefined} href="#for-you" onClick={() => setMobileNav(false)}><Heart size={17} />Made for you</a>
+          <a className={`nav-link ${activeNav === "shows" ? "active" : ""}`} aria-current={activeNav === "shows" ? "location" : undefined} href="#shows" onClick={() => setMobileNav(false)}><Ticket size={17} />Live shows<span className="nav-new">NEW</span></a>
+          <a className={`nav-link ${activeNav === "my-tickets" ? "active" : ""}`} aria-current={activeNav === "my-tickets" ? "location" : undefined} href="#my-tickets" onClick={() => setMobileNav(false)}><QrCode size={17} />My tickets</a>
         </nav>
         <div className="sidebar-rule" />
         <div className="nav-caption">YOUR SOUND</div>
