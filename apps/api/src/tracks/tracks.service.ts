@@ -6,6 +6,7 @@ import { UpdateTrackDto, UploadTrackDto } from "./tracks.dto";
 
 const trackSelect = {
   id: true,
+  artistId: true,
   title: true,
   artistName: true,
   audioUrl: true,
