@@ -4,6 +4,7 @@ import { AuthController } from "./auth.controller";
 import { AuthService } from "./auth.service";
 import { ArtistGuard } from "./artist.guard";
 import { JwtAuthGuard } from "./jwt-auth.guard";
+import { ArtistVerificationEmailService } from "./artist-verification-email.service";
 
 @Module({
   imports: [
@@ -13,7 +14,7 @@ import { JwtAuthGuard } from "./jwt-auth.guard";
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, ArtistGuard, JwtAuthGuard],
+  providers: [AuthService, ArtistGuard, JwtAuthGuard, ArtistVerificationEmailService],
   exports: [ArtistGuard, JwtAuthGuard, JwtModule],
 })
 export class AuthModule {}

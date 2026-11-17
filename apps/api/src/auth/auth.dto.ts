@@ -1,4 +1,4 @@
-import { IsEmail, IsString, MaxLength, MinLength } from "class-validator";
+import { IsEmail, IsString, Matches, MaxLength, MinLength } from "class-validator";
 
 export class RegisterDto {
   @IsString()
@@ -25,4 +25,10 @@ export class LoginDto {
   @MinLength(8)
   @MaxLength(72)
   password!: string;
+}
+
+export class VerifyArtistEmailDto {
+  @IsString()
+  @Matches(/^\d{6}$/)
+  code!: string;
 }
