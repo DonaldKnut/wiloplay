@@ -7,9 +7,11 @@ import {
   Req,
   UseGuards,
 } from "@nestjs/common";
+import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { AuthenticatedRequest, JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { ArtistsService } from "./artists.service";
 
+@ApiTags("Artists")
 @Controller("artists")
 export class ArtistsController {
   constructor(private readonly artists: ArtistsService) {}
@@ -20,6 +22,7 @@ export class ArtistsController {
   }
 
   @Get(":id/follow")
+  @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   isFollowing(
     @Req() request: AuthenticatedRequest,
@@ -29,6 +32,7 @@ export class ArtistsController {
   }
 
   @Put(":id/follow")
+  @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   follow(
     @Req() request: AuthenticatedRequest,
@@ -38,6 +42,7 @@ export class ArtistsController {
   }
 
   @Delete(":id/follow")
+  @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   unfollow(
     @Req() request: AuthenticatedRequest,

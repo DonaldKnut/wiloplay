@@ -7,6 +7,7 @@ import {
   Req,
   UseGuards,
 } from "@nestjs/common";
+import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { Request } from "express";
 import { ArtistGuard } from "../auth/artist.guard";
 import { AuthenticatedRequest, JwtAuthGuard } from "../auth/jwt-auth.guard";
@@ -16,16 +17,19 @@ import { EventsService } from "./events.service";
 type WebhookRequest = Request & { rawBody?: Buffer };
 
 @Controller("payments")
+@ApiTags("Payments")
 export class PaymentsController {
   constructor(private readonly events: EventsService) {}
 
   @Get("artist-bank-account")
+  @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, ArtistGuard)
   artistBankAccount(@Req() request: AuthenticatedRequest) {
     return this.events.getArtistBankAccount(request.user.sub);
   }
 
   @Post("artists/:artistId/verify")
+  @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, AdminGuard)
   verifyArtist(@Param("artistId") artistId: string) {
     return this.events.verifyArtist(artistId);

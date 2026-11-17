@@ -42,8 +42,14 @@ Event prices are entered and displayed in Nigerian naira; amounts are stored and
 
 ## API routes
 
+The API root (`/`) returns service status and links to the health check and documentation. Swagger UI is available at `/docs`, with the generated OpenAPI JSON at `/docs-json`.
+
 | Method | Route | Access |
 | --- | --- | --- |
+| `GET` | `/` | Public; API status and documentation links |
+| `GET` | `/health` | Public; API process health |
+| `GET` | `/docs` | Public; interactive Swagger UI |
+| `GET` | `/docs-json` | Public; OpenAPI specification |
 | `POST` | `/auth/signup` | Public; creates an account and emails a six-digit verification code |
 | `POST` | `/auth/login` | Public; sends a verification code if the email is not verified |
 | `POST` | `/auth/request-email-verification` | Signed in; requests a code for legacy sessions |

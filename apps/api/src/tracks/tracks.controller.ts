@@ -16,9 +16,15 @@ import { FileFieldsInterceptor } from "@nestjs/platform-express";
 import { diskStorage } from "multer";
 import { randomUUID } from "node:crypto";
 import { extname, join } from "node:path";
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiConsumes,
+  ApiTags,
+} from "@nestjs/swagger";
 import { ArtistGuard } from "../auth/artist.guard";
 import { AuthenticatedRequest, JwtAuthGuard } from "../auth/jwt-auth.guard";
-import { UpdateTrackDto, UploadTrackDto } from "./tracks.dto";
+import { MUSIC_GENRES, UpdateTrackDto, UploadTrackDto } from "./tracks.dto";
 import { TracksService } from "./tracks.service";
 import { AiTracksService } from "./ai-tracks.service";
 import { RecordListenDto } from "./listen.dto";
@@ -27,6 +33,7 @@ const supportedAudio = new Set([".mp3", ".wav", ".ogg", ".m4a", ".aac"]);
 const supportedImages = new Set([".jpg", ".jpeg", ".png", ".webp"]);
 
 @Controller("tracks")
+@ApiTags("Tracks")
 export class TracksController {
   constructor(
     private readonly tracks: TracksService,
@@ -39,12 +46,14 @@ export class TracksController {
   }
 
   @Get("mine")
+  @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, ArtistGuard)
   listMine(@Req() request: AuthenticatedRequest) {
     return this.tracks.listMine(request.user.sub);
   }
 
   @Get("ai/config")
+  @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, ArtistGuard)
   aiConfig() {
     return this.aiTracks.config();
@@ -56,6 +65,7 @@ export class TracksController {
   }
 
   @Post(":id/listens")
+  @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   recordListen(
     @Req() request: AuthenticatedRequest,
@@ -66,12 +76,34 @@ export class TracksController {
   }
 
   @Delete("listens/location")
+  @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   clearListenerLocation(@Req() request: AuthenticatedRequest) {
     return this.tracks.clearListenerLocation(request.user.sub);
   }
 
   @Post("upload")
+  @ApiBearerAuth()
+  @ApiConsumes("multipart/form-data")
+  @ApiBody({
+    schema: {
+      type: "object",
+      required: ["artistName", "genre", "releaseType", "files"],
+      properties: {
+        title: { type: "string", maxLength: 100 },
+        artistName: { type: "string", minLength: 1, maxLength: 100 },
+        genre: { type: "string", enum: [...MUSIC_GENRES] },
+        releaseType: { type: "string", enum: ["SINGLE", "ALBUM"] },
+        albumTitle: { type: "string", maxLength: 100 },
+        releaseDescription: { type: "string", maxLength: 500 },
+        files: {
+          type: "array",
+          items: { type: "string", format: "binary" },
+        },
+        cover: { type: "string", format: "binary" },
+      },
+    },
+  })
   @UseGuards(JwtAuthGuard, ArtistGuard)
   @UseInterceptors(
     FileFieldsInterceptor(
@@ -123,6 +155,7 @@ export class TracksController {
   }
 
   @Patch(":id")
+  @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, ArtistGuard)
   update(
     @Req() request: AuthenticatedRequest,
@@ -133,12 +166,14 @@ export class TracksController {
   }
 
   @Delete(":id")
+  @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, ArtistGuard)
   remove(@Req() request: AuthenticatedRequest, @Param("id") id: string) {
     return this.tracks.remove(request.user.sub, id);
   }
 
   @Post(":id/ai/suggest")
+  @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, ArtistGuard)
   suggest(
     @Req() request: AuthenticatedRequest,
@@ -148,6 +183,7 @@ export class TracksController {
   }
 
   @Post(":id/ai/cover")
+  @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, ArtistGuard)
   generateCover(
     @Req() request: AuthenticatedRequest,
@@ -157,6 +193,7 @@ export class TracksController {
   }
 
   @Post(":id/enhancement")
+  @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, ArtistGuard)
   startEnhancement(
     @Req() request: AuthenticatedRequest,
@@ -166,6 +203,7 @@ export class TracksController {
   }
 
   @Get(":id/enhancement")
+  @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, ArtistGuard)
   checkEnhancement(
     @Req() request: AuthenticatedRequest,

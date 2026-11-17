@@ -1,8 +1,10 @@
 import { Body, Controller, Post, Req, UseGuards } from "@nestjs/common";
+import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { AuthService } from "./auth.service";
 import { LoginDto, RegisterDto, VerifyEmailDto } from "./auth.dto";
 import { AuthenticatedRequest, JwtAuthGuard } from "./jwt-auth.guard";
 
+@ApiTags("Authentication")
 @Controller("auth")
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
@@ -18,12 +20,14 @@ export class AuthController {
   }
 
   @Post("request-email-verification")
+  @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   requestEmailVerification(@Req() request: AuthenticatedRequest) {
     return this.auth.requestEmailVerificationForUser(request.user.sub);
   }
 
   @Post("become-artist")
+  @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   becomeArtist(@Req() request: AuthenticatedRequest) {
     return this.auth.becomeArtist(request.user.sub);
