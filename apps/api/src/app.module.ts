@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { AuthModule } from "./auth/auth.module";
 import { ArtistsModule } from "./artists/artists.module";
+import { CatalogModule } from "./catalog/catalog.module";
 import { DeezerModule } from "./deezer/deezer.module";
 import { EventsModule } from "./events/events.module";
 import { AppController } from "./app.controller";
@@ -12,6 +13,16 @@ import { TracksModule } from "./tracks/tracks.module";
 
 @Module({
   controllers: [AppController, HealthController],
-  imports: [PrismaModule, AuthModule, ArtistsModule, DeezerModule, TracksModule, EventsModule, LibraryModule, SearchModule],
+  imports: [
+    PrismaModule,
+    AuthModule,
+    ArtistsModule,
+    CatalogModule,
+    DeezerModule,
+    TracksModule,
+    EventsModule,
+    LibraryModule,
+    SearchModule,
+  ],
 })
 export class AppModule {}

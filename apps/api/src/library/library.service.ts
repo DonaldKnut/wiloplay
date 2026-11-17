@@ -14,7 +14,7 @@ import {
 } from "./library.dto";
 
 type TrackSnapshot = {
-  source: "UPLOAD" | "DEEZER";
+  source: "UPLOAD" | "DEEZER" | "AUDIUS" | "JAMENDO" | "ITUNES";
   sourceTrackId: string;
   trackId?: string;
   title: string;
@@ -56,7 +56,7 @@ export class LibraryService {
   }
 
   async likeTrack(userId: string, input: LibraryTrackDto) {
-    const snapshot = await this.resolveTrack(input);
+    const snapshot = await this.resolveTrack(input, true);
     await this.prisma.likedTrack.upsert({
       where: {
         userId_source_sourceTrackId: {
@@ -107,7 +107,7 @@ export class LibraryService {
         userId,
         playbackId: input.playbackId,
         ...trackData,
-        externalTrackId: snapshot.source === "DEEZER" ? sourceTrackId : null,
+        externalTrackId: snapshot.source === "UPLOAD" ? null : sourceTrackId,
       },
       update: {},
       select: historySelect,
@@ -293,7 +293,10 @@ export class LibraryService {
       .map(({ score: _score, ...track }) => track);
   }
 
-  private async resolveTrack(input: LibraryTrackDto): Promise<TrackSnapshot> {
+  private async resolveTrack(
+    input: LibraryTrackDto,
+    allowUnavailable = false,
+  ): Promise<TrackSnapshot> {
     this.validateSource(input.source);
     if (input.source === "UPLOAD") {
       if (!input.trackId) throw new BadRequestException("Choose an uploaded track.");
@@ -315,25 +318,35 @@ export class LibraryService {
       };
     }
 
-    if (!input.externalTrackId || !/^\d+$/.test(input.externalTrackId)) {
-      throw new BadRequestException("Enter a valid Deezer track ID.");
-    }
-    if (!input.previewUrl) {
-      throw new BadRequestException("This Deezer track does not have a playable preview.");
-    }
-    const previewUrl = new URL(input.previewUrl);
-    if (
-      previewUrl.protocol !== "https:"
-      || !previewUrl.hostname.endsWith(".dzcdn.net")
-    ) {
-      throw new BadRequestException("The Deezer preview URL is invalid.");
+    if (!input.externalTrackId || (input.source === "DEEZER" && !/^\d+$/.test(input.externalTrackId))) {
+      throw new BadRequestException("Enter a valid catalog track ID.");
     }
     if (!input.title || !input.artistName) {
       throw new BadRequestException("Track title and artist are required.");
     }
 
+    if (!input.previewUrl && !allowUnavailable) {
+      throw new BadRequestException("This catalog track does not have playable audio.");
+    }
+    if (input.previewUrl) {
+      const previewUrl = new URL(input.previewUrl);
+      const trustedDomains = {
+        DEEZER: ["dzcdn.net"],
+        AUDIUS: ["audius.co"],
+        JAMENDO: ["jamendo.com"],
+        ITUNES: ["apple.com"],
+      }[input.source];
+      if (
+        previewUrl.protocol !== "https:"
+        || !trustedDomains.some((domain) =>
+          previewUrl.hostname === domain || previewUrl.hostname.endsWith(`.${domain}`))
+      ) {
+        throw new BadRequestException("The catalog audio URL is invalid.");
+      }
+    }
+
     return {
-      source: "DEEZER",
+      source: input.source,
       sourceTrackId: input.externalTrackId,
       title: input.title,
       artistName: input.artistName,
@@ -346,8 +359,10 @@ export class LibraryService {
     };
   }
 
-  private validateSource(source: string): asserts source is "UPLOAD" | "DEEZER" {
-    if (source !== "UPLOAD" && source !== "DEEZER") {
+  private validateSource(
+    source: string,
+  ): asserts source is "UPLOAD" | "DEEZER" | "AUDIUS" | "JAMENDO" | "ITUNES" {
+    if (!["UPLOAD", "DEEZER", "AUDIUS", "JAMENDO", "ITUNES"].includes(source)) {
       throw new BadRequestException("Choose a supported music source.");
     }
   }

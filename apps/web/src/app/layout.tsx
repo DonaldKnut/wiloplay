@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import ServiceWorkerRegistration from "./service-worker-registration";
 import ThemeInitializer from "./theme-initializer";
 import "./globals.css";
 import "./wiloplay-theme.css";
@@ -8,6 +9,13 @@ export const metadata: Metadata = {
   description:
     "Discover your next favorite song, support the artists you love, and find your people at a live show.",
   icons: { icon: "/icon.svg" },
+  manifest: "/manifest.webmanifest",
+  applicationName: "Wiloplay",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Wiloplay",
+  },
 };
 
 const themeBootScript = `(() => {
@@ -32,6 +40,7 @@ export default function RootLayout({
       </head>
       <body>
         <ThemeInitializer />
+        <ServiceWorkerRegistration />
         {children}
       </body>
     </html>

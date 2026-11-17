@@ -43,9 +43,9 @@ export class UpdatePlaylistDto {
 }
 
 export class LibraryTrackDto {
-  @ApiProperty({ enum: ["UPLOAD", "DEEZER"] })
-  @IsIn(["UPLOAD", "DEEZER"])
-  source!: "UPLOAD" | "DEEZER";
+  @ApiProperty({ enum: ["UPLOAD", "DEEZER", "AUDIUS", "JAMENDO", "ITUNES"] })
+  @IsIn(["UPLOAD", "DEEZER", "AUDIUS", "JAMENDO", "ITUNES"])
+  source!: "UPLOAD" | "DEEZER" | "AUDIUS" | "JAMENDO" | "ITUNES";
 
   @ApiPropertyOptional({ example: "cm123trackid", maxLength: 100 })
   @ValidateIf((input: LibraryTrackDto) => input.source === "UPLOAD")
@@ -55,21 +55,21 @@ export class LibraryTrackDto {
   trackId?: string;
 
   @ApiPropertyOptional({ example: "123456789", maxLength: 80 })
-  @ValidateIf((input: LibraryTrackDto) => input.source === "DEEZER")
+  @ValidateIf((input: LibraryTrackDto) => input.source !== "UPLOAD")
   @IsString()
   @MinLength(1)
   @MaxLength(80)
   externalTrackId?: string;
 
   @ApiPropertyOptional({ example: "Midnight City", maxLength: 120 })
-  @ValidateIf((input: LibraryTrackDto) => input.source === "DEEZER")
+  @ValidateIf((input: LibraryTrackDto) => input.source !== "UPLOAD")
   @IsString()
   @MinLength(1)
   @MaxLength(120)
   title?: string;
 
   @ApiPropertyOptional({ example: "M83", maxLength: 120 })
-  @ValidateIf((input: LibraryTrackDto) => input.source === "DEEZER")
+  @ValidateIf((input: LibraryTrackDto) => input.source !== "UPLOAD")
   @IsString()
   @MinLength(1)
   @MaxLength(120)
@@ -88,7 +88,8 @@ export class LibraryTrackDto {
   coverUrl?: string;
 
   @ApiPropertyOptional({ format: "uri", maxLength: 1000 })
-  @ValidateIf((input: LibraryTrackDto) => input.source === "DEEZER")
+  @ValidateIf((input: LibraryTrackDto) => input.source !== "UPLOAD")
+  @IsOptional()
   @IsUrl({ protocols: ["https"], require_protocol: true })
   @MaxLength(1000)
   previewUrl?: string;

@@ -67,7 +67,14 @@ export class EmailVerificationService {
     }
 
     try {
-      const webOrigin = process.env.WEB_ORIGIN?.replace(/\/+$/, "");
+      const webOrigins = (process.env.WEB_ORIGIN ?? "")
+        .split(",")
+        .map((value) => value.trim().replace(/\/+$/, ""))
+        .filter(Boolean);
+      const webOrigin =
+        webOrigins.find((origin) => !/localhost|127\.0\.0\.1/i.test(origin))
+        ?? webOrigins[0]
+        ?? undefined;
       const html = await renderFile(
         join(__dirname, "templates", input.template),
         { name: input.name, code: input.code, webOrigin },

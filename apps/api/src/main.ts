@@ -7,10 +7,35 @@ import { join } from "node:path";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import { AppModule } from "./app.module";
 
+function parseWebOrigins() {
+  const raw = process.env.WEB_ORIGIN ?? "http://localhost:3000";
+  return [
+    ...new Set(
+      raw
+        .split(",")
+        .map((value) => value.trim().replace(/\/+$/, ""))
+        .filter(Boolean),
+    ),
+  ];
+}
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { rawBody: true });
+  const allowedOrigins = parseWebOrigins();
   app.enableCors({
-    origin: process.env.WEB_ORIGIN ?? "http://localhost:3000",
+    origin(origin, callback) {
+      // Non-browser clients (curl, server-to-server) often omit Origin.
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+      // Always echo a single matching origin — never the raw comma-separated env string.
+      if (allowedOrigins.includes(origin)) {
+        callback(null, origin);
+        return;
+      }
+      callback(new Error(`Origin ${origin} is not allowed by CORS`), false);
+    },
     credentials: true,
   });
   app.useGlobalPipes(

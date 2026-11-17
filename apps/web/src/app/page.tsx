@@ -13,16 +13,21 @@ import {
   CreditCard,
   Disc3,
   Download,
+  Eye,
+  EyeOff,
   FileAudio2,
   Headphones,
   Heart,
   Home,
   ImagePlus,
+  Info,
   LogOut,
   Link2,
   ListMusic,
+  Maximize2,
   MapPin,
   Menu,
+  Minimize2,
   Mic2,
   Music2,
   QrCode,
@@ -32,6 +37,7 @@ import {
   Pencil,
   Repeat,
   Search,
+  Settings,
   Shuffle,
   Sun,
   Moon,
@@ -42,10 +48,21 @@ import {
   RefreshCw,
   Trash2,
   Upload,
+  UserRound,
   Users,
   Volume2,
   X,
 } from "lucide-react";
+import {
+  forgotPasswordSchema,
+  loginSchema,
+  resetPasswordSchema,
+  searchSchema,
+  settingsSchema,
+  signupSchema,
+  verifyEmailSchema,
+  zodErrorMessage,
+} from "./auth-schemas";
 import { applyTheme, resolveTheme, type WiloplayTheme } from "./theme-initializer";
 import {
   FormEvent,
@@ -66,6 +83,7 @@ type Track = {
   cover: string;
   preview?: string;
   audioUrl?: string;
+  providerTrackId?: string;
   duration?: number;
   album?: string;
   albumTitle?: string | null;
@@ -75,6 +93,26 @@ type Track = {
   genre?: string;
   releaseType?: "SINGLE" | "ALBUM";
   deezerUrl?: string;
+  provider?: string;
+  playback?: "full" | "preview";
+  attribution?: string;
+};
+
+type CatalogTrack = {
+  id: string;
+  provider: "audius" | "jamendo" | "deezer" | "itunes";
+  providerTrackId: string;
+  title: string;
+  artist: string;
+  album?: string;
+  cover?: string;
+  duration?: number;
+  genres: string[];
+  previewUrl?: string;
+  streamUrl?: string;
+  externalUrl?: string;
+  playback: "full" | "preview";
+  attribution?: string;
 };
 
 type ApiTrack = {
@@ -95,7 +133,7 @@ type ApiTrack = {
 
 type LibraryEntry = {
   id?: string;
-  source: "UPLOAD" | "DEEZER";
+  source: "UPLOAD" | "DEEZER" | "AUDIUS" | "JAMENDO" | "ITUNES";
   sourceTrackId?: string;
   externalTrackId?: string | null;
   title: string;
@@ -256,7 +294,7 @@ type PurchaseResult = TicketOrder & {
   emailMessage?: string;
 };
 type PaymentMode = "demo" | "paystack";
-type Modal = "login" | "signup" | "email-verification" | "forgot-password" | "reset-password" | "upload" | "event" | "checkout" | "purchase-result" | null;
+type Modal = "login" | "signup" | "email-verification" | "forgot-password" | "reset-password" | "settings" | "upload" | "event" | "checkout" | "purchase-result" | null;
 type PasswordResetChallenge = {
   accepted: true;
   email: string;
@@ -289,16 +327,18 @@ type SearchResponse = {
   tracks: ApiTrack[];
   artists: SearchArtistHit[];
   events: SearchEventHit[];
+  catalogTracks: CatalogTrack[];
   deezerTracks: Track[];
   totals: {
     tracks: number;
     artists: number;
     events: number;
+    catalogTracks: number;
     deezerTracks: number;
     all: number;
   };
 };
-type SearchFilter = "all" | "wiloplay" | "deezer" | "artists" | "shows";
+type SearchFilter = "all" | "wiloplay" | "catalog" | "artists" | "shows";
 type BarcodeDetectorConstructor = new (options: { formats: string[] }) => {
   detect(video: HTMLVideoElement): Promise<{ rawValue: string }[]>;
 };
@@ -331,6 +371,30 @@ const moods = [
     art: "photo-1470225620780-dba8ba36b745",
     color: "#cf8055",
     query: "pop hits",
+  },
+];
+
+const heroSlides = [
+  {
+    image: "https://images.pexels.com/photos/9522857/pexels-photo-9522857.jpeg?auto=compress&cs=tinysrgb&w=900",
+    alt: "Black rapper performing into a microphone",
+    category: "ARTIST SPOTLIGHT",
+    title: "A new sound is rising.",
+    detail: "Meet the voices shaping what comes next.",
+  },
+  {
+    image: "https://images.pexels.com/photos/32701414/pexels-photo-32701414.jpeg?auto=compress&cs=tinysrgb&w=900",
+    alt: "African musicians performing at an outdoor music gathering",
+    category: "LIVE · ROOTED IN RHYTHM",
+    title: "Feel every note together.",
+    detail: "Find the next live moment worth remembering.",
+  },
+  {
+    image: "https://images.pexels.com/photos/15188114/pexels-photo-15188114.jpeg?auto=compress&cs=tinysrgb&w=900",
+    alt: "Black podcast host recording beside a microphone",
+    category: "PODCAST · THE CREATIVE ROOM",
+    title: "More than the music.",
+    detail: "Conversations with the people behind the sound.",
   },
 ];
 
@@ -407,6 +471,10 @@ function formatTime(seconds?: number) {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
+function lyricsSearchUrl(track: Pick<Track, "title" | "artist">) {
+  return `https://genius.com/search?q=${encodeURIComponent(`${track.title} ${track.artist}`)}`;
+}
+
 function apiTrackToPlayerTrack(track: ApiTrack): Track {
   return {
     id: track.id,
@@ -421,7 +489,38 @@ function apiTrackToPlayerTrack(track: ApiTrack): Track {
     releaseType: track.releaseType,
     albumTitle: track.albumTitle,
     releaseDescription: track.releaseDescription,
+    provider: "wiloplay",
+    playback: "full",
   };
+}
+
+function catalogTrackToPlayerTrack(track: CatalogTrack): Track {
+  const playUrl = track.streamUrl || track.previewUrl || undefined;
+  return {
+    id: track.id,
+    providerTrackId: track.providerTrackId,
+    title: track.title,
+    artist: track.artist,
+    album: track.album,
+    cover: track.cover ?? "",
+    preview: track.playback === "preview" ? playUrl : playUrl,
+    audioUrl: track.playback === "full" ? playUrl : undefined,
+    duration: track.duration,
+    deezerUrl: track.externalUrl,
+    genre: track.genres[0],
+    provider: track.provider,
+    playback: track.playback,
+    attribution: track.attribution,
+  };
+}
+
+function catalogProviderLabel(provider?: string) {
+  if (provider === "audius") return "Audius";
+  if (provider === "jamendo") return "Jamendo";
+  if (provider === "itunes") return "iTunes";
+  if (provider === "deezer") return "Deezer";
+  if (provider === "wiloplay") return "Wiloplay";
+  return provider ? provider : "Catalog";
 }
 
 function libraryEntryToPlayerTrack(entry: LibraryEntry): Track {
@@ -429,6 +528,7 @@ function libraryEntryToPlayerTrack(entry: LibraryEntry): Track {
   const externalId = entry.sourceTrackId ?? entry.externalTrackId ?? "";
   return {
     id: entry.source === "DEEZER" ? Number(externalId) : externalId,
+    providerTrackId: entry.source === "UPLOAD" ? undefined : externalId,
     title: entry.title,
     artist: entry.artistName,
     album: entry.albumTitle ?? undefined,
@@ -437,26 +537,42 @@ function libraryEntryToPlayerTrack(entry: LibraryEntry): Track {
     deezerUrl: entry.deezerUrl ?? undefined,
     duration: entry.duration ?? undefined,
     genre: entry.genre ?? undefined,
+    provider: entry.source === "UPLOAD" ? "wiloplay" : entry.source.toLowerCase(),
   };
 }
 
 function libraryTrackKey(track: Track) {
-  return `${typeof track.id === "number" || track.preview ? "DEEZER" : "UPLOAD"}:${track.id}`;
+  const source = libraryTrackSource(track) ?? "CATALOG";
+  return `${source}:${track.providerTrackId ?? track.id}`;
 }
 
-function libraryTrackPayload(track: Track) {
-  if (typeof track.id === "string" && !track.preview) {
-    return { source: "UPLOAD" as const, trackId: track.id };
+function libraryTrackSource(track: Track): LibraryEntry["source"] | null {
+  switch (track.provider) {
+    case "audius": return "AUDIUS";
+    case "jamendo": return "JAMENDO";
+    case "deezer": return "DEEZER";
+    case "itunes": return "ITUNES";
+    default:
+      if (track.provider && track.provider !== "wiloplay") return null;
+      return typeof track.id === "number" || track.preview ? "DEEZER" : "UPLOAD";
   }
-  if (!track.preview) throw new Error("This Deezer track has no playable preview.");
+}
+
+function libraryTrackPayload(track: Track, requirePlayable = true) {
+  const source = libraryTrackSource(track);
+  if (!source) throw new Error("This music source cannot be saved yet.");
+  if (source === "UPLOAD") return { source, trackId: String(track.id) };
+
+  const playUrl = track.preview ?? track.audioUrl;
+  if (requirePlayable && !playUrl) throw new Error("This catalog track has no playable audio.");
   return {
-    source: "DEEZER" as const,
-    externalTrackId: String(track.id),
+    source,
+    externalTrackId: track.providerTrackId ?? String(track.id),
     title: track.title,
     artistName: track.artist,
     albumTitle: track.album ?? track.albumTitle ?? undefined,
     coverUrl: track.cover || undefined,
-    previewUrl: track.preview,
+    ...(playUrl ? { previewUrl: playUrl } : {}),
     deezerUrl: track.deezerUrl,
     duration: track.duration && track.duration > 0 ? track.duration : undefined,
     genre: track.genre,
@@ -555,6 +671,8 @@ export default function HomePage() {
   const [chart, setChart] = useState<DeezerChart | null>(null);
   const [chartError, setChartError] = useState("");
   const [chartLoading, setChartLoading] = useState(true);
+  const [catalogGenres, setCatalogGenres] = useState<string[]>([]);
+  const [activeCatalogGenre, setActiveCatalogGenre] = useState<string | null>(null);
   const [searchError, setSearchError] = useState("");
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchResults, setSearchResults] = useState<SearchResponse | null>(null);
@@ -638,13 +756,21 @@ export default function HomePage() {
   const [listenCity, setListenCity] = useState("");
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
+  const [searchMinimized, setSearchMinimized] = useState(false);
   const [activeNav, setActiveNav] = useState<
     "home" | "discovery" | "for-you" | "shows" | "my-tickets"
   >("home");
   const [theme, setTheme] = useState<WiloplayTheme>("dark");
+  const [heroSlideIndex, setHeroSlideIndex] = useState(0);
+  const [heroAutoplayPaused, setHeroAutoplayPaused] = useState(false);
+  const [heroHovered, setHeroHovered] = useState(false);
+  const [heroFocused, setHeroFocused] = useState(false);
+  const [playerExpanded, setPlayerExpanded] = useState(false);
   const [modal, setModal] = useState<Modal>(null);
   const [authMode, setAuthMode] = useState<"login" | "signup">("signup");
   const [authDraft, setAuthDraft] = useState({ name: "", email: "", password: "" });
+  const [authPasswordVisible, setAuthPasswordVisible] = useState(false);
+  const [resetPasswordVisible, setResetPasswordVisible] = useState(false);
   const [verificationEmail, setVerificationEmail] = useState("");
   const [verificationCode, setVerificationCode] = useState("");
   const [verificationPassword, setVerificationPassword] = useState("");
@@ -660,6 +786,8 @@ export default function HomePage() {
   const [paymentMode, setPaymentMode] = useState<PaymentMode | null>(null);
   const [paymentModeError, setPaymentModeError] = useState("");
   const [mobileNav, setMobileNav] = useState(false);
+  const [settingsName, setSettingsName] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const audioRef = useRef<HTMLAudioElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -874,26 +1002,51 @@ export default function HomePage() {
     }
   }, [token]);
 
+  const loadCatalogTrending = useCallback(async () => {
+    try {
+      const results = await request<{ tracks: CatalogTrack[] }>("/catalog/trending?limit=24");
+      setTracks(results.tracks.map(catalogTrackToPlayerTrack));
+    } catch {
+      // Keep any existing tracks; chart/search can still fill discovery.
+    }
+  }, []);
+
+  const loadCatalogGenres = useCallback(async () => {
+    try {
+      const results = await request<{ genres: string[] }>("/catalog/genres");
+      setCatalogGenres(results.genres ?? []);
+    } catch {
+      setCatalogGenres([]);
+    }
+  }, []);
+
   const searchTracks = useCallback(async (term: string) => {
     setSearchError("");
     setSearchFilter("all");
+    setActiveCatalogGenre(null);
     if (!term.trim()) {
-      setTracks([]);
       setSearchResults(null);
       setSearchLoading(false);
       setError("");
+      void loadCatalogTrending();
       return;
     }
     setSearchLoading(true);
     setSearchOpen(true);
     try {
       const results = await request<SearchResponse>(`/search?q=${encodeURIComponent(term.trim())}`);
-      const deezerTracks = results.deezerTracks.map((item) => ({
-        ...item,
-        duration: Math.min(item.duration ?? 30, 30),
-      }));
-      setSearchResults({ ...results, deezerTracks });
-      setTracks(deezerTracks);
+      const catalogTracks = results.catalogTracks ?? [];
+      const playable = catalogTracks.map(catalogTrackToPlayerTrack);
+      setSearchResults({
+        ...results,
+        catalogTracks,
+        totals: {
+          ...results.totals,
+          catalogTracks: catalogTracks.length,
+          deezerTracks: results.totals.deezerTracks ?? playable.filter((track) => track.provider === "deezer").length,
+        },
+      });
+      setTracks(playable);
       setError("");
       if (!results.totals.all) {
         setSearchError("Nothing matched that search yet. Try another artist, song, mood, or city.");
@@ -902,6 +1055,30 @@ export default function HomePage() {
       setTracks([]);
       setSearchResults(null);
       setSearchError("Search is having a quiet moment. Your Wiloplay artist releases are still here.");
+    } finally {
+      setSearchLoading(false);
+    }
+  }, [loadCatalogTrending]);
+
+  const browseCatalogGenre = useCallback(async (genre: string) => {
+    setSearchError("");
+    setSearchFilter("catalog");
+    setActiveCatalogGenre(genre);
+    setQuery(genre);
+    setSearchLoading(true);
+    try {
+      const results = await request<{ tracks: CatalogTrack[] }>(
+        `/catalog/genres/${encodeURIComponent(genre)}?limit=24`,
+      );
+      const playable = results.tracks.map(catalogTrackToPlayerTrack);
+      setTracks(playable);
+      setSearchResults(null);
+      setError("");
+      if (!playable.length) {
+        setSearchError(`No ${genre} tracks came back just yet. Try another genre or search.`);
+      }
+    } catch {
+      setSearchError("Genre browsing is having a quiet moment. Try search instead.");
     } finally {
       setSearchLoading(false);
     }
@@ -972,6 +1149,8 @@ export default function HomePage() {
     loadUploads();
     void searchTracks("indie chill");
     void loadChart();
+    void loadCatalogGenres();
+    void loadCatalogTrending();
     const sharedTrackId = new URLSearchParams(window.location.search).get("track");
     if (sharedTrackId) {
       void request<Track & { artistName: string; coverUrl?: string | null }>(
@@ -990,7 +1169,7 @@ export default function HomePage() {
         setError(reason instanceof Error ? reason.message : "The shared track could not be loaded.");
       });
     }
-  }, [loadChart, loadEvents, loadUploads, searchTracks]);
+  }, [loadCatalogGenres, loadCatalogTrending, loadChart, loadEvents, loadUploads, searchTracks]);
 
   useEffect(() => {
     if (!token || !user) return;
@@ -1155,10 +1334,75 @@ export default function HomePage() {
   }, [playing, current]);
 
   function onSearchChange(value: string) {
-    setQuery(value);
+    const parsed = searchSchema.safeParse({ query: value });
+    if (!parsed.success) {
+      setSearchError(zodErrorMessage(parsed.error));
+      setQuery(value.slice(0, 100));
+      return;
+    }
+    setSearchError("");
+    setQuery(parsed.data.query);
     if (searchTimer.current) clearTimeout(searchTimer.current);
-    searchTimer.current = setTimeout(() => void searchTracks(value), 350);
+    searchTimer.current = setTimeout(() => void searchTracks(parsed.data.query), 350);
   }
+
+  useEffect(() => {
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    if (reducedMotion.matches || heroAutoplayPaused || heroHovered || heroFocused) return;
+    const timer = window.setInterval(() => {
+      setHeroSlideIndex((index) => (index + 1) % heroSlides.length);
+    }, 6500);
+    return () => window.clearInterval(timer);
+  }, [heroAutoplayPaused, heroFocused, heroHovered]);
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      if (modal) {
+        event.preventDefault();
+        closeModal();
+        return;
+      }
+      if (playerExpanded) {
+        event.preventDefault();
+        setPlayerExpanded(false);
+        return;
+      }
+      if (searchOpen) {
+        event.preventDefault();
+        closeSearchPanel();
+        return;
+      }
+      if (!searchMinimized) {
+        event.preventDefault();
+        setSearchMinimized(true);
+        return;
+      }
+      if (mobileNav) {
+        event.preventDefault();
+        setMobileNav(false);
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [modal, playerExpanded, searchOpen, searchMinimized, mobileNav]);
+
+  useEffect(() => {
+    document.body.style.overflow = modal || mobileNav || playerExpanded ? "hidden" : "";
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [modal, mobileNav, playerExpanded]);
+
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 851px)");
+    const onChange = () => {
+      if (media.matches) setMobileNav(false);
+    };
+    onChange();
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, []);
 
   function showMessage(message: string) {
     setNotice(message);
@@ -1217,7 +1461,7 @@ export default function HomePage() {
         setLikedTracks((old) => old.filter((item) => libraryTrackKey(item) !== key));
         showMessage("Removed from your liked songs.");
       } else {
-        const payload = libraryTrackPayload(track);
+        const payload = libraryTrackPayload(track, false);
         await request<{ liked: boolean }>("/library/likes", token, {
           method: "PUT",
           body: JSON.stringify(payload),
@@ -1360,6 +1604,7 @@ export default function HomePage() {
 
   function openLibraryTab(tab: "recommendations" | "liked" | "history") {
     if (!requireListenerSession()) return;
+    setMobileNav(false);
     setLibraryTab(tab);
     document.getElementById("library")?.scrollIntoView({ behavior: "smooth" });
   }
@@ -1438,7 +1683,10 @@ export default function HomePage() {
   function closeModal() {
     setModal(null);
     setError("");
+    setFieldErrors({});
     setPurchaseResult(null);
+    setAuthPasswordVisible(false);
+    setResetPasswordVisible(false);
     if (modal === "email-verification") {
       setVerificationCode("");
       if (token && !user?.emailVerifiedAt) logout();
@@ -1447,6 +1695,53 @@ export default function HomePage() {
       setResetCode("");
       setResetPasswordDraft("");
     }
+  }
+
+  function closeSearchPanel() {
+    setSearchOpen(false);
+  }
+
+  function toggleSearch() {
+    if (searchMinimized) {
+      setSearchMinimized(false);
+      requestAnimationFrame(() => document.getElementById("global-search")?.focus());
+      return;
+    }
+    setSearchOpen(false);
+    setSearchMinimized(true);
+  }
+
+  function openSearch() {
+    setSearchMinimized(false);
+    setSearchOpen(true);
+    requestAnimationFrame(() => document.getElementById("global-search")?.focus());
+  }
+
+  function openSettings() {
+    setMobileNav(false);
+    if (!user) {
+      setAuthMode("login");
+      setModal("login");
+      return;
+    }
+    setSettingsName(user.name);
+    setFieldErrors({});
+    setError("");
+    setModal("settings");
+  }
+
+  function openProfile() {
+    setMobileNav(false);
+    if (!user) {
+      setAuthMode("login");
+      setModal("login");
+      return;
+    }
+    if (user.role === "ARTIST") {
+      window.location.assign(`/artist/${encodeURIComponent(user.id)}`);
+      return;
+    }
+    openSettings();
   }
 
   function toggleTheme() {
@@ -1475,18 +1770,40 @@ export default function HomePage() {
   async function handleAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
+    setFieldErrors({});
     setBusy(true);
     const formData = Object.fromEntries(new FormData(event.currentTarget).entries());
     const password = String(formData.password ?? "");
-    const payload = authMode === "signup"
-      ? {
-          name: String(formData.name ?? ""),
-          email: String(formData.email ?? ""),
+    const parsed = authMode === "signup"
+      ? signupSchema.safeParse({
+          name: String(formData.name ?? authDraft.name),
+          email: String(formData.email ?? authDraft.email),
           password,
+        })
+      : loginSchema.safeParse({
+          email: String(formData.email ?? authDraft.email),
+          password,
+        });
+    if (!parsed.success) {
+      const nextErrors: Record<string, string> = {};
+      for (const issue of parsed.error.issues) {
+        const key = String(issue.path[0] ?? "form");
+        if (!nextErrors[key]) nextErrors[key] = issue.message;
+      }
+      setFieldErrors(nextErrors);
+      setError(zodErrorMessage(parsed.error));
+      setBusy(false);
+      return;
+    }
+    const payload = "name" in parsed.data
+      ? {
+          name: parsed.data.name,
+          email: parsed.data.email,
+          password: parsed.data.password,
         }
       : {
-          email: String(formData.email ?? ""),
-          password,
+          email: parsed.data.email,
+          password: parsed.data.password,
         };
     try {
       const result = await request<AuthResponse>(
@@ -1595,14 +1912,18 @@ export default function HomePage() {
     event.preventDefault();
     setBusy(true);
     setError("");
+    setFieldErrors({});
+    const parsed = verifyEmailSchema.safeParse({ email: verificationEmail, code: verificationCode });
+    if (!parsed.success) {
+      setError(zodErrorMessage(parsed.error));
+      setBusy(false);
+      return;
+    }
     try {
       const result = await request<AuthSession>(
         "/auth/verify-email",
         null,
-        {
-          method: "POST",
-          body: JSON.stringify({ email: verificationEmail, code: verificationCode }),
-        },
+        { method: "POST", body: JSON.stringify(parsed.data) },
       );
       establishSession(result, "Your email is verified. Welcome to Wiloplay.");
     } catch (reason) {
@@ -1616,12 +1937,19 @@ export default function HomePage() {
     event.preventDefault();
     setBusy(true);
     setError("");
-    const email = authDraft.email.trim().toLowerCase();
+    setFieldErrors({});
+    const parsed = forgotPasswordSchema.safeParse({ email: authDraft.email });
+    if (!parsed.success) {
+      setFieldErrors({ email: zodErrorMessage(parsed.error) });
+      setError(zodErrorMessage(parsed.error));
+      setBusy(false);
+      return;
+    }
     try {
       const result = await request<PasswordResetChallenge>(
         "/auth/forgot-password",
         null,
-        { method: "POST", body: JSON.stringify({ email }) },
+        { method: "POST", body: JSON.stringify(parsed.data) },
       );
       setVerificationEmail(result.email);
       setResetExpiresInSeconds(result.expiresInSeconds ?? 600);
@@ -1640,18 +1968,22 @@ export default function HomePage() {
     event.preventDefault();
     setBusy(true);
     setError("");
+    setFieldErrors({});
+    const parsed = resetPasswordSchema.safeParse({
+      email: verificationEmail,
+      code: resetCode,
+      password: resetPasswordDraft,
+    });
+    if (!parsed.success) {
+      setError(zodErrorMessage(parsed.error));
+      setBusy(false);
+      return;
+    }
     try {
       const result = await request<AuthSession>(
         "/auth/reset-password",
         null,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            email: verificationEmail,
-            code: resetCode,
-            password: resetPasswordDraft,
-          }),
-        },
+        { method: "POST", body: JSON.stringify(parsed.data) },
       );
       establishSession(result, "Password updated. You're signed in.");
     } catch (reason) {
@@ -1659,6 +1991,32 @@ export default function HomePage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function submitSettings(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setFieldErrors({});
+    const parsed = settingsSchema.safeParse({ name: settingsName, city: cityDraft });
+    if (!parsed.success) {
+      setError(zodErrorMessage(parsed.error));
+      return;
+    }
+    if (user) {
+      const nextUser = { ...user, name: parsed.data.name };
+      localStorage.setItem("sonora-user", JSON.stringify(nextUser));
+      setUser(nextUser);
+    }
+    setCityDraft(parsed.data.city);
+    if (parsed.data.city.trim()) {
+      localStorage.setItem("wiloplay-listener-city", parsed.data.city.trim());
+      setListenCity(parsed.data.city.trim());
+    } else {
+      localStorage.removeItem("wiloplay-listener-city");
+      setListenCity("");
+    }
+    showMessage("Your profile settings were updated on this device.");
+    setModal(null);
   }
 
   function logout() {
@@ -2226,12 +2584,12 @@ export default function HomePage() {
     [searchResults],
   );
   const shownTracks = useMemo(() => {
-    if (!query.trim() || !searchResults) return [...uploadedTracks, ...tracks];
-    if (searchFilter === "deezer") return tracks;
+    if (!query.trim() || (!searchResults && !activeCatalogGenre)) return [...uploadedTracks, ...tracks];
+    if (searchFilter === "catalog") return tracks;
     if (searchFilter === "wiloplay") return wiloplaySearchTracks;
     if (searchFilter === "artists" || searchFilter === "shows") return [];
     return [...wiloplaySearchTracks, ...tracks];
-  }, [query, searchResults, searchFilter, uploadedTracks, tracks, wiloplaySearchTracks]);
+  }, [query, searchResults, searchFilter, uploadedTracks, tracks, wiloplaySearchTracks, activeCatalogGenre]);
   const activeLibraryTracks = libraryTab === "liked"
     ? likedTracks
     : libraryTab === "history"
@@ -2279,38 +2637,168 @@ export default function HomePage() {
 
   return (
     <main className="app-shell">
-      <aside className={`sidebar ${mobileNav ? "sidebar-open" : ""}`}>
-        <a href="#" className="brand" aria-label="Wiloplay home">
-          <span className="brand-mark"><AudioLines size={21} strokeWidth={2.2} /></span>
-          <span>wiloplay<span className="brand-dot">.</span></span>
-        </a>
-        <div className="nav-caption">YOUR SPACE</div>
-        <nav className="side-nav" aria-label="Main navigation">
-          <a className={`nav-link ${activeNav === "home" ? "active" : ""}`} aria-current={activeNav === "home" ? "location" : undefined} href="#home" onClick={() => setMobileNav(false)}><Home size={17} />Home</a>
-          <button className={`nav-link ${activeNav === "discovery" ? "active" : ""}`} aria-current={activeNav === "discovery" ? "location" : undefined} onClick={() => { setActiveNav("discovery"); setSearchOpen(true); setMobileNav(false); document.getElementById("discovery")?.scrollIntoView({ behavior: "smooth" }); }}><Compass size={17} />Discover</button>
-          <a className={`nav-link ${activeNav === "for-you" ? "active" : ""}`} aria-current={activeNav === "for-you" ? "location" : undefined} href="#library" onClick={() => setMobileNav(false)}><Heart size={17} />Made for you</a>
-          <a className={`nav-link ${activeNav === "shows" ? "active" : ""}`} aria-current={activeNav === "shows" ? "location" : undefined} href="#shows" onClick={() => setMobileNav(false)}><Ticket size={17} />Live shows<span className="nav-new">NEW</span></a>
-          <a className={`nav-link ${activeNav === "my-tickets" ? "active" : ""}`} aria-current={activeNav === "my-tickets" ? "location" : undefined} href="#my-tickets" onClick={() => setMobileNav(false)}><QrCode size={17} />My tickets</a>
-        </nav>
-        <div className="sidebar-rule" />
-        <div className="nav-caption">YOUR SOUND</div>
-        <button className="library-link" onClick={() => openPlaylistDialog()}><Plus size={16} />Create a playlist</button>
-        <button className="library-link" onClick={() => openLibraryTab("liked")}><Heart size={15} />Liked songs</button>
-        <button className="library-link" onClick={() => openLibraryTab("history")}><Clock3 size={15} />Listening history</button>
-        <div className="sidebar-playlists" aria-label="Your playlists">
-          {playlists.slice(0, 5).map((playlist) => <button className="sidebar-playlist-link" key={playlist.id} onClick={() => void showPlaylist(playlist.id)}><ListMusic size={14} /><span>{playlist.name}</span></button>)}
-          {!playlists.length && <div className="playlist-empty">Your music, your mood.<br />Create a playlist and keep the good stuff close.</div>}
-        </div>
-        <div className="sidebar-bottom">
-          <div className="sidebar-note">
-            <div className="note-icon"><Mic2 size={18} /></div>
-            <div><strong>Made something?</strong><span>Your listeners are out there.</span></div>
-          </div>
-          <button className="sidebar-artist" onClick={() => user?.role === "ARTIST" ? openUploadWizard() : user ? void becomeArtist() : (setAuthMode("signup"), setModal("signup"))}>
-            Start as an artist <ArrowRight size={14} />
+      <button
+        type="button"
+        className={`sidebar-scrim${mobileNav ? " is-visible" : ""}`}
+        aria-label="Close menu"
+        tabIndex={mobileNav ? 0 : -1}
+        onClick={() => setMobileNav(false)}
+      />
+      <aside
+        className={`sidebar${mobileNav ? " is-open" : ""}`}
+        aria-label="Primary navigation"
+        data-open={mobileNav ? "true" : "false"}
+      >
+        <div className="sidebar-aura" aria-hidden="true" />
+        <header className="sidebar-header">
+          <a href="#home" className="brand" aria-label="Wiloplay home" onClick={() => setMobileNav(false)}>
+            <span className="brand-mark"><AudioLines size={18} strokeWidth={2.25} /></span>
+            <span className="brand-copy">
+              <strong>wiloplay<span className="brand-dot">.</span></strong>
+              <small>Listen in</small>
+            </span>
+          </a>
+          <button className="sidebar-close" type="button" aria-label="Close menu" onClick={() => setMobileNav(false)}>
+            <X size={17} />
           </button>
-          <div className="sidebar-footer">A little more music. A lot more you.</div>
+        </header>
+
+        <button type="button" className="sidebar-identity" onClick={openProfile}>
+          <span className="sidebar-avatar" aria-hidden="true">
+            {user?.name?.trim() ? user.name.trim().charAt(0).toUpperCase() : <UserRound size={16} />}
+          </span>
+          <span className="sidebar-identity-copy">
+            <strong>{user ? user.name : "Welcome in"}</strong>
+            <small>{user ? (user.role === "ARTIST" ? "Artist account" : "Listener account") : "Sign in to sync your sound"}</small>
+          </span>
+          <span className="sidebar-identity-action" aria-hidden="true"><ArrowRight size={14} /></span>
+        </button>
+
+        <div className="sidebar-scroll">
+          <section className="sidebar-section">
+            <p className="nav-caption">Explore</p>
+            <nav className="side-nav" aria-label="Main navigation">
+              <a className={`nav-link ${activeNav === "home" ? "active" : ""}`} aria-current={activeNav === "home" ? "location" : undefined} href="#home" onClick={() => setMobileNav(false)}>
+                <span className="nav-ico"><Home size={16} /></span>
+                <span className="nav-label">Home</span>
+              </a>
+              <a
+                className={`nav-link ${activeNav === "discovery" ? "active" : ""}`}
+                aria-current={activeNav === "discovery" ? "location" : undefined}
+                href="/sound"
+                onClick={() => setMobileNav(false)}
+              >
+                <span className="nav-ico"><Compass size={16} /></span>
+                <span className="nav-label">Discover</span>
+              </a>
+              <a className={`nav-link ${activeNav === "for-you" ? "active" : ""}`} aria-current={activeNav === "for-you" ? "location" : undefined} href="#library" onClick={() => setMobileNav(false)}>
+                <span className="nav-ico"><Heart size={16} /></span>
+                <span className="nav-label">Made for you</span>
+              </a>
+              <a className={`nav-link ${activeNav === "shows" ? "active" : ""}`} aria-current={activeNav === "shows" ? "location" : undefined} href="#shows" onClick={() => setMobileNav(false)}>
+                <span className="nav-ico"><Ticket size={16} /></span>
+                <span className="nav-label">Live shows</span>
+              </a>
+              <a className="nav-link" href="/tickets" onClick={() => setMobileNav(false)}>
+                <span className="nav-ico"><QrCode size={16} /></span>
+                <span className="nav-label">Tickets</span>
+                <span className="nav-new">NEW</span>
+              </a>
+              <a className={`nav-link ${activeNav === "my-tickets" ? "active" : ""}`} aria-current={activeNav === "my-tickets" ? "location" : undefined} href="#my-tickets" onClick={() => setMobileNav(false)}>
+                <span className="nav-ico"><BadgeCheck size={16} /></span>
+                <span className="nav-label">My tickets</span>
+              </a>
+            </nav>
+          </section>
+
+          <section className="sidebar-section">
+            <p className="nav-caption">Your library</p>
+            <div className="sidebar-stack">
+              <button type="button" className="library-link" onClick={() => { setMobileNav(false); openPlaylistDialog(); }}>
+                <span className="nav-ico"><Plus size={15} /></span>
+                <span>Create a playlist</span>
+              </button>
+              <button type="button" className="library-link" onClick={() => openLibraryTab("liked")}>
+                <span className="nav-ico"><Heart size={15} /></span>
+                <span>Liked songs</span>
+              </button>
+              <button type="button" className="library-link" onClick={() => openLibraryTab("history")}>
+                <span className="nav-ico"><Clock3 size={15} /></span>
+                <span>Listening history</span>
+              </button>
+            </div>
+            <div className="sidebar-playlists" aria-label="Your playlists">
+              {playlists.slice(0, 6).map((playlist) => (
+                <button
+                  type="button"
+                  className="sidebar-playlist-link"
+                  key={playlist.id}
+                  onClick={() => {
+                    setMobileNav(false);
+                    void showPlaylist(playlist.id);
+                  }}
+                >
+                  <span className="nav-ico"><ListMusic size={14} /></span>
+                  <span>{playlist.name}</span>
+                </button>
+              ))}
+              {!playlists.length && (
+                <div className="playlist-empty">
+                  Keep the good stuff close.
+                  <br />
+                  Your playlists will live here.
+                </div>
+              )}
+            </div>
+          </section>
+
+          <section className="sidebar-section">
+            <p className="nav-caption">Account</p>
+            <div className="sidebar-stack">
+              <button type="button" className="library-link" onClick={openProfile}>
+                <span className="nav-ico"><UserRound size={15} /></span>
+                <span>{user ? "My profile" : "Sign in"}</span>
+              </button>
+              <button type="button" className="library-link" onClick={openSettings}>
+                <span className="nav-ico"><Settings size={15} /></span>
+                <span>Settings</span>
+              </button>
+            </div>
+          </section>
         </div>
+
+        <footer className="sidebar-bottom">
+          <div className="sidebar-note">
+            <div className="note-icon"><Mic2 size={16} /></div>
+            <div>
+              <strong>{user?.role === "ARTIST" ? "Share a release" : "Made something?"}</strong>
+              <span>{user?.role === "ARTIST" ? "Upload and find your people." : "Your listeners are out there."}</span>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="sidebar-artist"
+            onClick={() => {
+              if (user?.role === "ARTIST") {
+                setMobileNav(false);
+                openUploadWizard();
+                return;
+              }
+              if (user) {
+                setMobileNav(false);
+                void becomeArtist();
+                return;
+              }
+              setAuthMode("signup");
+              setModal("signup");
+              setMobileNav(false);
+            }}
+          >
+            <span>{user?.role === "ARTIST" ? "Upload music" : "Start as an artist"}</span>
+            <ArrowRight size={14} />
+          </button>
+          <p className="sidebar-footer">A little more music. A lot more you.</p>
+        </footer>
       </aside>
 
       <section className="main-panel" id="home">
@@ -2320,17 +2808,22 @@ export default function HomePage() {
             <button className="icon-btn top-arrow" aria-label="Go back" onClick={() => window.history.back()}><ArrowLeft size={17} /></button>
             <button className="icon-btn top-arrow" aria-label="Go forward" onClick={() => window.history.forward()}><ArrowRight size={17} /></button>
             <div className="search-shell">
-              <form className={`search-box ${searchOpen ? "search-focused" : ""}`} role="search" onSubmit={(event) => { event.preventDefault(); void searchTracks(query); document.getElementById("track-list")?.scrollIntoView({ behavior: "smooth" }); }}>
-                <Search size={16} />
-                <input aria-label="Search songs, artists, albums, and shows" placeholder="Songs, artists, albums, shows..." value={query} onFocus={() => setSearchOpen(true)} onChange={(event) => onSearchChange(event.target.value)} onBlur={() => window.setTimeout(() => setSearchOpen(false), 180)} />
-                {searchLoading ? <span className="search-loading" aria-live="polite">Searching</span> : query ? <button className="search-clear" type="button" aria-label="Clear search" onClick={() => { setQuery(""); void searchTracks(""); }}><X size={14} /></button> : null}
+              {searchOpen && <button type="button" className="search-scrim" aria-label="Close search" onClick={closeSearchPanel} />}
+              <form className={`search-box${searchOpen ? " search-focused" : ""}${searchMinimized ? " search-minimized" : ""}`} role="search" onSubmit={(event) => { event.preventDefault(); void searchTracks(query); document.getElementById("track-list")?.scrollIntoView({ behavior: "smooth" }); setSearchOpen(true); }}>
+                <button type="button" className="search-toggle" aria-label={searchMinimized ? "Expand search" : "Minimize search"} aria-expanded={!searchMinimized} aria-controls={searchMinimized ? undefined : "global-search"} onClick={toggleSearch}><Search size={16} /></button>
+                {!searchMinimized && <input id="global-search" aria-label="Search songs, artists, albums, and shows" placeholder="Songs, artists, albums, shows..." value={query} onFocus={() => setSearchOpen(true)} onChange={(event) => onSearchChange(event.target.value)} />}
+                {!searchMinimized && (searchLoading ? <span className="search-loading" aria-live="polite">Searching</span> : query ? <button className="search-clear" type="button" aria-label="Clear search" onClick={() => { setQuery(""); void searchTracks(""); closeSearchPanel(); }}><X size={14} /></button> : null)}
               </form>
               {searchOpen && (query.trim() || searchResults) && <div className="search-panel" role="listbox" aria-label="Search results">
+                <div className="search-panel-head">
+                  <strong>Search</strong>
+                  <button type="button" className="search-panel-close" aria-label="Close search" onMouseDown={(event) => event.preventDefault()} onClick={closeSearchPanel}><X size={15} /></button>
+                </div>
                 <div className="search-filter-row">
                   {([
                     ["all", "All", searchResults?.totals.all ?? 0],
                     ["wiloplay", "Wiloplay", searchResults?.totals.tracks ?? 0],
-                    ["deezer", "Previews", searchResults?.totals.deezerTracks ?? 0],
+                    ["catalog", "Catalog", searchResults?.totals.catalogTracks ?? tracks.length],
                     ["artists", "Artists", searchResults?.totals.artists ?? 0],
                     ["shows", "Shows", searchResults?.totals.events ?? 0],
                   ] as const).map(([id, label, count]) => (
@@ -2339,7 +2832,7 @@ export default function HomePage() {
                     </button>
                   ))}
                 </div>
-                {searchLoading && <p className="search-panel-empty">Looking across Wiloplay and Deezer…</p>}
+                {searchLoading && <p className="search-panel-empty">Looking across Wiloplay and free catalogs…</p>}
                 {!searchLoading && searchError && <p className="search-panel-empty">{searchError}</p>}
                 {!searchLoading && !searchError && query.trim() && !searchResults?.totals.all && <p className="search-panel-empty">No matches yet. Try another song, artist, mood, or city.</p>}
                 {!searchLoading && searchResults && (searchFilter === "all" || searchFilter === "wiloplay") && searchResults.tracks.slice(0, 5).map((track) => {
@@ -2348,11 +2841,12 @@ export default function HomePage() {
                     <Cover src={playable.cover} alt="" /><span><strong>{track.title}</strong><small>{track.artistName} · Wiloplay{track.genre ? ` · ${track.genre}` : ""}</small></span><Play size={13} />
                   </button>;
                 })}
-                {!searchLoading && searchResults && (searchFilter === "all" || searchFilter === "deezer") && searchResults.deezerTracks.slice(0, 5).map((track) => (
-                  <button type="button" className="search-hit" key={`deezer-${track.id}`} onMouseDown={(event) => event.preventDefault()} onClick={() => { toggleTrack(track); setSearchOpen(false); }}>
-                    <Cover src={track.cover} alt="" /><span><strong>{track.title}</strong><small>{track.artist} · Preview</small></span><Play size={13} />
-                  </button>
-                ))}
+                {!searchLoading && (searchFilter === "all" || searchFilter === "catalog") && (searchResults?.catalogTracks ?? []).slice(0, 5).map((track) => {
+                  const playable = catalogTrackToPlayerTrack(track);
+                  return <button type="button" className="search-hit" key={`catalog-${track.id}`} onMouseDown={(event) => event.preventDefault()} onClick={() => { toggleTrack(playable); setSearchOpen(false); }}>
+                    <Cover src={playable.cover} alt="" /><span><strong>{track.title}</strong><small>{track.artist} · {catalogProviderLabel(track.provider)} · {track.playback === "full" ? "Full" : "Preview"}</small></span><Play size={13} />
+                  </button>;
+                })}
                 {!searchLoading && searchResults && (searchFilter === "all" || searchFilter === "artists") && searchResults.artists.slice(0, 5).map((artist) => (
                   <a className="search-hit" key={`artist-${artist.id}`} href={`/artist/${encodeURIComponent(artist.id)}`} onMouseDown={(event) => event.preventDefault()}>
                     <Cover src={artist.coverUrl ? `${API}${artist.coverUrl}` : ""} alt="" /><span><strong>{artist.name}</strong><small>{artist.trackCount} release{artist.trackCount === 1 ? "" : "s"} · {artist.followers} follower{artist.followers === 1 ? "" : "s"}</small></span><Users size={13} />
@@ -2409,15 +2903,91 @@ export default function HomePage() {
               <div className="eyebrow"><span className="eyebrow-line" /> A DIFFERENT KIND OF MUSIC APP</div>
               <h1>Music finds<br />its <span>people.</span></h1>
               <p>Less scrolling, more feeling. Discover your next favorite, get closer to the artists, and meet us at the show.</p>
-              <div className="hero-actions"><a className="hero-cta" href="#discovery">Find your sound <ArrowRight size={16} /></a><button className="hero-secondary" onClick={() => { setAuthMode("signup"); setModal("signup"); }}>I&apos;m an artist <ArrowDownToLine size={15} /></button></div>
+              <div className="hero-actions"><a className="hero-cta" href="/sound">Find your sound <ArrowRight size={16} /></a><button className="hero-secondary" onClick={() => { setAuthMode("signup"); setModal("signup"); }}>I&apos;m an artist <ArrowDownToLine size={15} /></button></div>
               <div className="hero-proof"><span className="proof-avatars"><i>J</i><i>M</i><i>A</i><i>+</i></span><span>Good music. Good people. <strong>That&apos;s it.</strong></span></div>
             </div>
-            <div className="hero-art" aria-hidden="true">
-              <div className="hero-image hero-image-back" />
-              <div className="hero-image hero-image-main" />
-              <div className="vinyl"><div className="vinyl-center"><AudioLines size={22} /></div></div>
-              <div className="floating-player"><span className="floating-cover" /><span className="floating-track"><strong>soft hours</strong><small>vol. 04 · your mix</small></span><span className="floating-bars"><i /><i /><i /><i /><i /></span></div>
-              <span className="art-sparkle sparkle-one">✳</span><span className="art-sparkle sparkle-two">✴</span>
+            <div className="hero-art">
+              <div
+                className="hero-swiper"
+                role="region"
+                aria-roledescription="carousel"
+                aria-label="Featured artists, live music, and podcasts"
+                onMouseEnter={() => setHeroHovered(true)}
+                onMouseLeave={(event) => {
+                  setHeroHovered(false);
+                  if (!event.currentTarget.contains(document.activeElement)) {
+                    setHeroFocused(false);
+                  }
+                }}
+                onFocusCapture={() => setHeroFocused(true)}
+                onBlurCapture={(event) => {
+                  const nextTarget = event.relatedTarget;
+                  if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
+                    setHeroFocused(false);
+                  }
+                }}
+              >
+                <div className="hero-slide-stack" aria-live="off">
+                  {heroSlides.map((slide, index) => {
+                    const distance = (index - heroSlideIndex + heroSlides.length) % heroSlides.length;
+                    const position = distance === 0
+                      ? "current"
+                      : distance === 1
+                        ? "next"
+                        : distance === heroSlides.length - 1
+                          ? "previous"
+                          : "hidden";
+                    return (
+                      <article
+                        className={`hero-slide hero-slide-${position}`}
+                        key={slide.category}
+                        role="group"
+                        aria-roledescription="slide"
+                        aria-label={`${index + 1} of ${heroSlides.length}: ${slide.category}`}
+                        aria-hidden={position !== "current"}
+                      >
+                        <div
+                          className="hero-slide-photo"
+                          role="img"
+                          aria-label={slide.alt}
+                          style={{ backgroundImage: `url("${slide.image}")` }}
+                        />
+                        <div className="hero-slide-topline"><span>WILOPLAY ORIGINAL</span><AudioLines size={16} /></div>
+                        <div className="hero-slide-copy">
+                          <span>{slide.category}</span>
+                          <strong>{slide.title}</strong>
+                          <small>{slide.detail}</small>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+                <div className="hero-swiper-footer">
+                  <span className="hero-swiper-count">0{heroSlideIndex + 1}<i>/</i>0{heroSlides.length}</span>
+                  <div className="hero-swiper-dots" role="group" aria-label="Choose a featured story">
+                    {heroSlides.map((slide, index) => (
+                      <button
+                        key={slide.category}
+                        type="button"
+                        aria-label={`Show ${slide.category.toLowerCase()}`}
+                        aria-pressed={heroSlideIndex === index}
+                        className={heroSlideIndex === index ? "is-active" : ""}
+                        onClick={() => setHeroSlideIndex(index)}
+                      />
+                    ))}
+                  </div>
+                  <div className="hero-swiper-actions">
+                    <button type="button" aria-label="Previous featured story" onClick={() => setHeroSlideIndex((index) => (index + heroSlides.length - 1) % heroSlides.length)}><ArrowLeft size={15} /></button>
+                    <button type="button" aria-label={heroAutoplayPaused ? "Resume featured stories" : "Pause featured stories"} aria-pressed={heroAutoplayPaused} onClick={() => setHeroAutoplayPaused((paused) => !paused)}>{heroAutoplayPaused ? <Play size={13} fill="currentColor" /> : <Pause size={13} />}</button>
+                    <button type="button" aria-label="Next featured story" onClick={() => setHeroSlideIndex((index) => (index + 1) % heroSlides.length)}><ArrowRight size={15} /></button>
+                  </div>
+                </div>
+                <div className="hero-floating-note" aria-hidden="true">
+                  <span><AudioLines size={18} /></span>
+                  <div><small>ON THE WILOPLAY RADAR</small><strong>{heroSlides[heroSlideIndex].category}</strong></div>
+                  <i className="hero-note-pulse" />
+                </div>
+              </div>
             </div>
             <div className="hero-bottom"><span>01 — YOUR DAILY RESET</span><span>MADE FOR THE MOMENT YOU&apos;RE IN <span className="hero-bottom-dash">↗</span></span></div>
           </section>
@@ -2425,13 +2995,30 @@ export default function HomePage() {
           <section className="section discovery-section" id="discovery">
             <div className="section-heading">
               <div><span className="section-kicker">A GOOD PLACE TO START</span><h2>{query ? "Your search, your sound." : "What are we feeling?"}</h2><p>{query ? `Showing the good stuff for “${query}”` : <>A little moodboard for wherever your head&apos;s at.</>}</p></div>
-              <button className="text-link" onClick={() => { setSearchOpen(true); document.querySelector<HTMLInputElement>(".search-box input")?.focus(); }}>Search something <ArrowRight size={15} /></button>
+              <button className="text-link" onClick={openSearch}>Search something <ArrowRight size={15} /></button>
             </div>
             <div className="mood-grid" id="for-you">{moods.map((mood, index) => (
               <button className="mood-card" key={mood.label} style={{ "--mood-color": mood.color, "--mood-image": `url(https://images.unsplash.com/${mood.art}?w=850&h=420&fit=crop)` } as React.CSSProperties} onClick={() => { setQuery(mood.query); void searchTracks(mood.query); document.getElementById("track-list")?.scrollIntoView({ behavior: "smooth" }); }}>
                 <div className="mood-art" /><span className="mood-number">0{index + 1} / MOOD</span><span className="mood-card-copy"><strong>{mood.label}</strong><small>{mood.sub}</small></span><span className="mood-play"><Play size={15} fill="currentColor" /></span>
               </button>
             ))}</div>
+            {catalogGenres.length > 0 && (
+              <div className="search-filter-row search-filter-row-inline catalog-genre-row" aria-label="Browse catalog genres">
+                {catalogGenres.map((genre) => (
+                  <button
+                    key={genre}
+                    type="button"
+                    className={`search-filter${activeCatalogGenre === genre ? " is-active" : ""}`}
+                    onClick={() => {
+                      void browseCatalogGenre(genre);
+                      document.getElementById("track-list")?.scrollIntoView({ behavior: "smooth" });
+                    }}
+                  >
+                    {genre}
+                  </button>
+                ))}
+              </div>
+            )}
           </section>
 
           <section className="section top-charts-section" id="top-charts">
@@ -2540,14 +3127,14 @@ export default function HomePage() {
 
           <section className="section tracks-section" id="track-list">
             <div className="section-heading compact-heading">
-              <div><span className="section-kicker">{query ? "SEARCH RESULTS" : "THE FIRST SONG IS THE HARDEST"}</span><h2>{query ? `Results for “${query}”` : "Good things, on repeat."}</h2><p>{query ? `${shownTracks.length} playable track${shownTracks.length === 1 ? "" : "s"}${searchResults ? ` · ${searchResults.totals.artists} artist${searchResults.totals.artists === 1 ? "" : "s"} · ${searchResults.totals.events} show${searchResults.totals.events === 1 ? "" : "s"}` : ""}` : "Wiloplay releases and Deezer previews in one place."}</p></div>
-              <span className="source-note"><Disc3 size={14} /> {searchFilter === "wiloplay" ? "Wiloplay only" : searchFilter === "deezer" ? "Deezer previews" : "Wiloplay + previews"}</span>
+              <div><span className="section-kicker">{query ? "SEARCH RESULTS" : "THE FIRST SONG IS THE HARDEST"}</span><h2>{query ? `Results for “${query}”` : "Good things, on repeat."}</h2><p>{query ? `${shownTracks.length} playable track${shownTracks.length === 1 ? "" : "s"}${searchResults ? ` · ${searchResults.totals.artists} artist${searchResults.totals.artists === 1 ? "" : "s"} · ${searchResults.totals.events} show${searchResults.totals.events === 1 ? "" : "s"}` : ""}` : "Wiloplay uploads plus free full streams and commercial previews."}</p></div>
+              <span className="source-note"><Disc3 size={14} /> {searchFilter === "wiloplay" ? "Wiloplay only" : searchFilter === "catalog" ? "Free catalog" : "Wiloplay + catalog"}</span>
             </div>
             {query.trim() && <div className="search-filter-row search-filter-row-inline">
               {([
                 ["all", "All"],
                 ["wiloplay", "Wiloplay"],
-                ["deezer", "Previews"],
+                ["catalog", "Catalog"],
                 ["artists", "Artists"],
                 ["shows", "Shows"],
               ] as const).map(([id, label]) => (
@@ -2586,19 +3173,19 @@ export default function HomePage() {
                   <span className="track-index">{isCurrent && playing ? <AudioLines size={15} /> : String(index + 1).padStart(2, "0")}</span>
                   <button className="track-art-button" aria-label={`${isCurrent && playing ? "Pause" : "Play"} ${track.title}`} onClick={() => toggleTrack(track)}><Cover src={track.cover} alt={`${track.title} cover`} /><span className="track-overlay">{isCurrent && playing ? <Pause size={15} fill="currentColor" /> : <Play size={15} fill="currentColor" />}</span></button>
                   <div className="track-title-with-profile">
-                    <button className="track-title" onClick={() => toggleTrack(track)}><strong>{track.title}</strong><span>{track.artist}</span></button>
+                    <button className="track-title" onClick={() => toggleTrack(track)}><strong>{track.title}</strong><span>{track.artist}{track.provider ? ` · ${catalogProviderLabel(track.provider)}${track.playback === "preview" ? " preview" : track.playback === "full" ? " full" : ""}` : ""}</span></button>
                     {track.artistProfileId && <a className="track-profile-link" href={`/artist/${encodeURIComponent(track.artistProfileId)}`} aria-label={`View ${track.artist} artist profile`} title={`View ${track.artist} artist profile`}><Users size={13} /><span>Profile</span></a>}
                   </div>
-                  <span className="track-album">{track.album ?? "Your next favorite"}</span>
+                  <span className="track-album">{track.album ?? track.attribution ?? "Your next favorite"}</span>
                   <div className="track-actions">
-                    <button className={`track-heart${isLiked ? " hearted" : ""}`} aria-label={isLiked ? `Remove ${track.title} from liked songs` : `Like ${track.title}`} aria-pressed={isLiked} disabled={typeof track.id === "number" && !track.preview} onClick={() => void toggleLikeTrack(track)}><Heart size={16} fill={isLiked ? "currentColor" : "none"} /></button>
+                    <button className={`track-heart${isLiked ? " hearted" : ""}`} aria-label={isLiked ? `Remove ${track.title} from liked songs` : `Like ${track.title}`} aria-pressed={isLiked} onClick={() => void toggleLikeTrack(track)}><Heart size={16} fill={isLiked ? "currentColor" : "none"} /></button>
                     <button className="track-heart track-add-button" aria-label={`Add ${track.title} to a playlist`} onClick={() => openPlaylistDialog(track)}><Plus size={15} /></button>
                   </div>
                   <span className="track-duration">{formatTime(track.duration)}</span>
                 </div>;
               }) : searchError ? null : <div className="empty-search"><Search size={18} />Nothing found just yet. Try another search?</div>}
             </div>
-            <button className="browse-more" onClick={() => { setSearchOpen(true); document.querySelector<HTMLInputElement>(".search-box input")?.focus(); }}>Keep exploring <ArrowRight size={15} /></button>
+            <button className="browse-more" onClick={openSearch}>Keep exploring <ArrowRight size={15} /></button>
           </section>
 
           <section className="artist-banner">
@@ -2607,10 +3194,25 @@ export default function HomePage() {
             <span className="artist-banner-caption">YOUR NEXT CHAPTER STARTS HERE — 02</span>
           </section>
 
+          <section className="tickets-cta-band" aria-label="Tickets">
+            <div className="tickets-cta-copy">
+              <span className="section-kicker">TICKETS, MADE CLEAR</span>
+              <h2>Walk in ready.</h2>
+              <p>A premium, calm path from show to door — pricing, payment, QR entry, and what happens next.</p>
+            </div>
+            <div className="tickets-cta-actions">
+              <a className="tickets-cta-primary" href="/tickets">Explore tickets <ArrowRight size={15} /></a>
+              <a className="tickets-cta-secondary" href="#shows">Browse live shows</a>
+            </div>
+          </section>
+
           <section className="section events-section" id="shows">
             <div className="section-heading">
               <div><span className="section-kicker">SOME THINGS SOUND BETTER TOGETHER</span><h2>Meet us at the show.</h2><p>Real rooms. Real music. A night you&apos;ll actually remember.</p></div>
-              <button className="text-link" onClick={() => user?.role === "ARTIST" ? openEventWizard() : user ? showMessage("Become an artist to put your next show on the map.") : (setAuthMode("signup"), setModal("signup"))}>Put on a show <Plus size={15} /></button>
+              <div className="section-heading-actions">
+                <a className="text-link" href="/tickets">How tickets work <ArrowRight size={15} /></a>
+                <button className="text-link" onClick={() => user?.role === "ARTIST" ? openEventWizard() : user ? showMessage("Become an artist to put your next show on the map.") : (setAuthMode("signup"), setModal("signup"))}>Put on a show <Plus size={15} /></button>
+              </div>
             </div>
             {upcomingEvents.length ? <div className="event-grid">{upcomingEvents.map((item, index) => <article className="event-card" id={`event-${item.id}`} key={item.id}>
               <div className="event-image" style={{ backgroundImage: `linear-gradient(180deg, transparent 38%, rgba(18,16,24,.76)), url("${item.coverUrl || `https://images.unsplash.com/${["photo-1501386761578-eac5c94b800a", "photo-1506157786151-b8491531f063", "photo-1470225620780-dba8ba36b745"][index % 3]}?w=760&h=520&fit=crop`}")` }}><span className="event-date"><strong>{new Date(item.startsAt).getDate()}</strong><small>{new Date(item.startsAt).toLocaleDateString("en-US", { month: "short" }).toUpperCase()}</small></span><span className="event-price">{item.priceCents ? `From ${formatPrice(item.priceCents)} + 10% fee` : "Free"}</span></div>
@@ -2733,11 +3335,11 @@ export default function HomePage() {
             ))}</div> : <div className="ticket-empty"><p>Your uploaded singles and albums will appear here.</p><button className="ticket-button" onClick={openUploadWizard}>Upload your first release</button></div>}
           </section>}
 
-          <footer className="footer"><a href="#" className="brand footer-brand"><span className="brand-mark"><AudioLines size={18} /></span><span>wiloplay<span className="brand-dot">.</span></span></a><span>Made for music people. Wherever you find them.</span><div><a href="#discovery">Discover</a><a href="#shows">Live shows</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a><button onClick={() => showMessage("More good things are on the way.")}>About us</button></div></footer>
+          <footer className="footer"><a href="#" className="brand footer-brand"><span className="brand-mark"><AudioLines size={18} /></span><span>wiloplay<span className="brand-dot">.</span></span></a><span>Made for music people. Wherever you find them.</span><div><a href="/sound">Discover</a><a href="/tickets">Tickets</a><a href="#shows">Live shows</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a><button onClick={() => showMessage("More good things are on the way.")}>About us</button></div></footer>
         </div>
       </section>
 
-      <div className="player" aria-label="Music player">
+      <div className={`player${playerExpanded ? " player-expanded" : ""}`} role="region" aria-label={playerExpanded ? "Expanded music player" : "Music player"}>
         <audio ref={audioRef} onPlay={recordPlaybackHistory} onTimeUpdate={(event) => { setElapsed(event.currentTarget.currentTime); recordQualifiedListen(event.currentTarget); }} onDurationChange={(event) => { if (Number.isFinite(event.currentTarget.duration)) setMediaDuration(event.currentTarget.duration); }} onEnded={() => {
           if (repeatMode === "one" && audioRef.current) {
             audioRef.current.currentTime = 0;
@@ -2748,7 +3350,7 @@ export default function HomePage() {
           stepQueue(1, true);
         }} onError={() => { if (current && playing) { setPlaying(false); showMessage("This audio couldn't start. Try another track."); } }} />
         <div className="player-track">
-          {current ? <><Cover src={current.cover} alt="" className="player-cover" /><div className="player-track-info"><strong>{current.title}</strong><span>{current.artist}</span></div><button className={`player-heart${likedTrackKeys.includes(libraryTrackKey(current)) ? " hearted" : ""}`} aria-label={likedTrackKeys.includes(libraryTrackKey(current)) ? "Remove from liked songs" : "Add to liked songs"} aria-pressed={likedTrackKeys.includes(libraryTrackKey(current))} onClick={() => void toggleLikeTrack(current)}><Heart size={15} fill={likedTrackKeys.includes(libraryTrackKey(current)) ? "currentColor" : "none"} /></button></> : <><div className="player-placeholder"><Headphones size={17} /></div><div className="player-track-info"><strong>Your next favorite is out there.</strong><span>Press play and see where you end up.</span></div></>}
+          {current ? <><Cover src={current.cover} alt="" className="player-cover" /><div className="player-track-info"><strong>{current.title}</strong><span>{current.artist}</span></div><a className="player-lyrics-link" href={lyricsSearchUrl(current)} target="_blank" rel="noopener noreferrer" aria-label={`Search lyrics for ${current.title} by ${current.artist}`} title="Find lyrics on Genius"><ListMusic size={14} /><span>Lyrics</span></a><button className={`player-heart${likedTrackKeys.includes(libraryTrackKey(current)) ? " hearted" : ""}`} aria-label={likedTrackKeys.includes(libraryTrackKey(current)) ? "Remove from liked songs" : "Add to liked songs"} aria-pressed={likedTrackKeys.includes(libraryTrackKey(current))} onClick={() => void toggleLikeTrack(current)}><Heart size={15} fill={likedTrackKeys.includes(libraryTrackKey(current)) ? "currentColor" : "none"} /></button></> : <><div className="player-placeholder"><Headphones size={17} /></div><div className="player-track-info"><strong>Your next favorite is out there.</strong><span>Press play and see where you end up.</span></div></>}
         </div>
         <div className="player-center">
           <div className="player-controls">
@@ -2761,6 +3363,9 @@ export default function HomePage() {
           <div className="progress-row"><span>{formatTime(elapsed)}</span><input className="progress-slider" aria-label="Seek through track" type="range" min="0" max={mediaDuration || 0} step="1" value={Math.min(elapsed, mediaDuration || 0)} disabled={!mediaDuration} onChange={(event) => { const time = Number(event.target.value); if (audioRef.current) audioRef.current.currentTime = time; setElapsed(time); }} /><span>{formatTime(mediaDuration || current?.duration)}</span></div>
         </div>
         <div className="player-right"><details className="location-sharing-control"><summary><MapPin size={14} /><span>{listenCity ? `City: ${listenCity}` : "Share city"}</span></summary><form onSubmit={saveListenerCity}><label htmlFor="listener-city">Optional city for trend analytics</label><input id="listener-city" value={cityDraft} maxLength={80} onChange={(event) => setCityDraft(event.target.value)} placeholder="e.g. Lagos" /><small>Only your city is shared, and artist profiles show aggregated totals. No GPS is used.</small><button>{listenCity ? "Update city" : "Share city"}</button>{listenCity && <button type="button" className="city-sharing-stop" onClick={() => void stopCitySharing()}>Stop sharing</button>}</form></details><Volume2 size={16} /><input className="volume-slider" aria-label="Volume" type="range" min="0" max="1" step="0.05" value={volume} onChange={(event) => { const level = Number(event.target.value); setVolume(level); if (audioRef.current) audioRef.current.volume = level; }} /><button className="queue-btn" aria-label="Toggle play queue" aria-expanded={queueOpen} onClick={() => setQueueOpen((open) => !open)}><Menu size={18} /></button></div>
+        <button className="player-expand-button" type="button" aria-label={playerExpanded ? "Minimize player" : "Maximize player"} aria-expanded={playerExpanded} onClick={() => { setPlayerExpanded((expanded) => !expanded); setQueueOpen(false); }}>
+          {playerExpanded ? <Minimize2 size={17} /> : <Maximize2 size={17} />}
+        </button>
       </div>
 
       {queueOpen && <aside className="queue-panel" aria-label="Play queue">
@@ -2790,55 +3395,116 @@ export default function HomePage() {
       </div>}
 
       {modal && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeModal(); }}>
-        <section key={modal} className={`modal-card${modal === "upload" || modal === "event" ? " wizard-modal" : ""}`} role="dialog" aria-modal="true" aria-labelledby="modal-heading">
+        <section key={modal} className={`modal-card${modal === "upload" || modal === "event" ? " wizard-modal" : ""}${modal === "login" || modal === "signup" || modal === "forgot-password" || modal === "reset-password" || modal === "email-verification" || modal === "settings" ? " auth-modal" : ""}`} role="dialog" aria-modal="true" aria-labelledby="modal-heading">
           <button className="modal-close" aria-label="Close dialog" onClick={closeModal}><X size={18} /></button>
-          <div className="modal-logo"><AudioLines size={21} /></div>
-          {modal === "login" || modal === "signup" ? <>
-            <span className="section-kicker">YOUR PEOPLE ARE HERE</span><h2 id="modal-heading">{authMode === "signup" ? "Find your people." : "Good to have you back."}</h2><p className="modal-subtitle">{authMode === "signup" ? "One account. Every song that feels like you." : "Pick up right where the music left off. Unverified accounts continue to email verification."}</p>
-            <form key={`auth-${authMode}`} className="modal-form" onSubmit={(event) => void handleAuth(event)}>
-              {authMode === "signup" && <label>Your name<input name="name" autoComplete="name" placeholder="How should we call you?" value={authDraft.name} onChange={(event) => setAuthDraft((draft) => ({ ...draft, name: event.target.value }))} required minLength={2} maxLength={60} /></label>}
-              <label>Email address<input name="email" type="email" autoComplete="email" placeholder="you@somewhere.com" value={authDraft.email} onChange={(event) => setAuthDraft((draft) => ({ ...draft, email: event.target.value }))} required /></label>
-              <label>Password<input name="password" type="password" autoComplete={authMode === "signup" ? "new-password" : "current-password"} placeholder={authMode === "signup" ? "8+ chars, letter and number" : "Your password"} value={authDraft.password} onChange={(event) => setAuthDraft((draft) => ({ ...draft, password: event.target.value }))} minLength={8} required /></label>
-              {authMode === "signup" && <>
-                <label className="auth-consent"><input type="checkbox" name="termsAccepted" required /><span>By creating an account, you agree to the <a href="/terms" target="_blank" rel="noreferrer">Terms and Conditions</a> and acknowledge the <a href="/privacy" target="_blank" rel="noreferrer">Privacy Policy</a>.</span></label>
-                <p className="auth-legal-copy">We&apos;ll email a verification code before your account is fully active.</p>
-              </>}
-              {error && <div className="form-error" role="alert">{error}</div>}<button className="form-submit" disabled={busy}>{busy ? "One second..." : authMode === "signup" ? "Create your account" : "Log in"} <ArrowRight size={15} /></button>
-            </form>
-            {authMode === "login" && <div className="auth-link-row"><button type="button" onClick={() => { setError(""); setModal("forgot-password"); }}>Forgot password?</button><button type="button" onClick={() => { setError(""); setModal("forgot-password"); }}>Resend password reset</button></div>}
-            <p className="modal-switch">{authMode === "signup" ? "Already found us?" : "New around here?"} <button onClick={() => { setAuthMode(authMode === "signup" ? "login" : "signup"); setAuthDraft((draft) => ({ ...draft, password: "" })); setError(""); }}>{authMode === "signup" ? "Log in" : "Make an account"}</button></p>
-            <p className="auth-legal-links"><a href="/terms" target="_blank" rel="noreferrer">Terms and Conditions</a><span>·</span><a href="/privacy" target="_blank" rel="noreferrer">Privacy Policy</a></p>
+          {(modal === "login" || modal === "signup") ? <>
+            <div className="auth-modal-hero">
+              <div className="modal-logo"><AudioLines size={21} /></div>
+              <span className="section-kicker">YOUR PEOPLE ARE HERE</span>
+              <h2 id="modal-heading">{authMode === "signup" ? "Create your account." : "Welcome back."}</h2>
+              <p className="modal-subtitle">{authMode === "signup" ? "One account for music, tickets, and the artists you love." : "Pick up right where the music left off."}</p>
+              <div className="auth-mode-toggle" role="tablist" aria-label="Authentication mode">
+                <button type="button" role="tab" aria-selected={authMode === "login"} className={authMode === "login" ? "is-active" : ""} onClick={() => { setAuthMode("login"); setModal("login"); setAuthPasswordVisible(false); setError(""); setFieldErrors({}); }}>Log in</button>
+                <button type="button" role="tab" aria-selected={authMode === "signup"} className={authMode === "signup" ? "is-active" : ""} onClick={() => { setAuthMode("signup"); setModal("signup"); setAuthPasswordVisible(false); setError(""); setFieldErrors({}); }}>Sign up</button>
+              </div>
+            </div>
+            <div className="auth-modal-body">
+              <form key={`auth-${authMode}`} className="modal-form auth-form" onSubmit={(event) => void handleAuth(event)}>
+                {authMode === "signup" && <label>Your name<input name="name" autoComplete="name" placeholder="How should we call you?" value={authDraft.name} onChange={(event) => setAuthDraft((draft) => ({ ...draft, name: event.target.value }))} aria-invalid={Boolean(fieldErrors.name)} required minLength={2} maxLength={60} />{fieldErrors.name && <small className="field-error">{fieldErrors.name}</small>}</label>}
+                <label>Email address<input name="email" type="email" autoComplete="email" placeholder="you@somewhere.com" value={authDraft.email} onChange={(event) => setAuthDraft((draft) => ({ ...draft, email: event.target.value }))} aria-invalid={Boolean(fieldErrors.email)} required />{fieldErrors.email && <small className="field-error">{fieldErrors.email}</small>}</label>
+                <label>Password
+                  <span className="password-field">
+                    <input id="auth-password" name="password" type={authPasswordVisible ? "text" : "password"} autoComplete={authMode === "signup" ? "new-password" : "current-password"} placeholder={authMode === "signup" ? "8+ chars, letter and number" : "Your password"} value={authDraft.password} onChange={(event) => setAuthDraft((draft) => ({ ...draft, password: event.target.value }))} aria-invalid={Boolean(fieldErrors.password)} minLength={8} required />
+                    <button className="password-visibility-toggle" type="button" aria-label={authPasswordVisible ? "Hide password" : "Show password"} aria-pressed={authPasswordVisible} aria-controls="auth-password" onClick={() => setAuthPasswordVisible((visible) => !visible)}>{authPasswordVisible ? <EyeOff size={16} /> : <Eye size={16} />}</button>
+                  </span>
+                  {fieldErrors.password && <small className="field-error">{fieldErrors.password}</small>}
+                </label>
+                {authMode === "signup" && <>
+                  <p className="auth-legal-notice" role="note"><Info size={15} aria-hidden="true" /><span>By creating an account, you agree to the <a href="/terms" target="_blank" rel="noreferrer">Terms and Conditions</a> and acknowledge the <a href="/privacy" target="_blank" rel="noreferrer">Privacy Policy</a>.</span></p>
+                  <p className="auth-legal-copy">We&apos;ll email a verification code before your account is fully active.</p>
+                </>}
+                {error && <div className="form-error" role="alert">{error}</div>}
+                <button className="form-submit" disabled={busy}>{busy ? "One second..." : authMode === "signup" ? "Create your account" : "Log in"} <ArrowRight size={15} /></button>
+              </form>
+              {authMode === "login" && <div className="auth-link-row"><button type="button" onClick={() => { setError(""); setFieldErrors({}); setModal("forgot-password"); }}>Forgot password?</button><button type="button" onClick={() => { setError(""); setFieldErrors({}); setModal("forgot-password"); }}>Resend password reset</button></div>}
+              <p className="auth-legal-links"><a href="/terms" target="_blank" rel="noreferrer">Terms and Conditions</a><span>·</span><a href="/privacy" target="_blank" rel="noreferrer">Privacy Policy</a></p>
+            </div>
           </> : modal === "forgot-password" ? <>
-            <span className="section-kicker">ACCOUNT RECOVERY</span><h2 id="modal-heading">Reset your password.</h2>
-            <p className="modal-subtitle">Enter the email on your account. We&apos;ll send a six-digit code if it matches. You can also use this to resend a password reset code.</p>
-            <form className="modal-form" onSubmit={(event) => void submitForgotPassword(event)}>
-              <label>Email address<input name="email" type="email" autoComplete="email" placeholder="you@somewhere.com" value={authDraft.email} onChange={(event) => setAuthDraft((draft) => ({ ...draft, email: event.target.value }))} required /></label>
-              {error && <div className="form-error" role="alert">{error}</div>}
-              <button className="form-submit" disabled={busy || !authDraft.email.trim()}>{busy ? "Sending..." : "Send reset code"} <ArrowRight size={15} /></button>
-            </form>
-            <div className="auth-link-row"><button type="button" onClick={() => { setAuthMode("login"); setModal("login"); setError(""); }}>Back to log in</button><button type="button" onClick={() => { setAuthMode("signup"); setModal("signup"); setError(""); }}>Create an account</button></div>
-            <p className="auth-legal-links"><a href="/terms" target="_blank" rel="noreferrer">Terms and Conditions</a><span>·</span><a href="/privacy" target="_blank" rel="noreferrer">Privacy Policy</a></p>
+            <div className="auth-modal-body auth-modal-body-solo">
+              <div className="modal-logo"><AudioLines size={21} /></div>
+              <span className="section-kicker">ACCOUNT RECOVERY</span><h2 id="modal-heading">Reset your password.</h2>
+              <p className="modal-subtitle">Enter the email on your account. We&apos;ll send a six-digit code if it matches. You can also use this to resend a password reset code.</p>
+              <form className="modal-form" onSubmit={(event) => void submitForgotPassword(event)}>
+                <label>Email address<input name="email" type="email" autoComplete="email" placeholder="you@somewhere.com" value={authDraft.email} onChange={(event) => setAuthDraft((draft) => ({ ...draft, email: event.target.value }))} required /></label>
+                {error && <div className="form-error" role="alert">{error}</div>}
+                <button className="form-submit" disabled={busy || !authDraft.email.trim()}>{busy ? "Sending..." : "Send reset code"} <ArrowRight size={15} /></button>
+              </form>
+              <div className="auth-link-row"><button type="button" onClick={() => { setAuthMode("login"); setModal("login"); setError(""); }}>Back to log in</button><button type="button" onClick={() => { setAuthMode("signup"); setModal("signup"); setError(""); }}>Create an account</button></div>
+              <p className="auth-legal-links"><a href="/terms" target="_blank" rel="noreferrer">Terms and Conditions</a><span>·</span><a href="/privacy" target="_blank" rel="noreferrer">Privacy Policy</a></p>
+            </div>
           </> : modal === "reset-password" ? <>
-            <span className="section-kicker">CHOOSE A NEW PASSWORD</span><h2 id="modal-heading">Almost there.</h2>
-            <p className="modal-subtitle">Enter the code sent to <strong>{verificationEmail}</strong> and pick a new password. Codes expire in {Math.max(1, Math.ceil(resetExpiresInSeconds / 60))} minutes.</p>
-            <form className="modal-form" onSubmit={(event) => void submitResetPassword(event)}>
-              <label>Reset code<input className="email-verification-code" name="code" type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} placeholder="000000" value={resetCode} onChange={(event) => setResetCode(event.target.value.replace(/\D/g, "").slice(0, 6))} required /></label>
-              <label>New password<input name="password" type="password" autoComplete="new-password" placeholder="8+ chars, letter and number" value={resetPasswordDraft} onChange={(event) => setResetPasswordDraft(event.target.value)} minLength={8} required /></label>
-              {error && <div className="form-error" role="alert">{error}</div>}
-              <button className="form-submit" disabled={busy || resetCode.length !== 6 || resetPasswordDraft.length < 8}>{busy ? "Saving..." : "Update password"} <ArrowRight size={15} /></button>
-            </form>
-            <div className="auth-link-row"><button type="button" disabled={busy} onClick={() => { setModal("forgot-password"); setError(""); }}>Resend password reset code</button><button type="button" onClick={() => { setAuthMode("login"); setModal("login"); setError(""); }}>Back to log in</button></div>
+            <div className="auth-modal-body auth-modal-body-solo">
+              <div className="modal-logo"><AudioLines size={21} /></div>
+              <span className="section-kicker">CHOOSE A NEW PASSWORD</span><h2 id="modal-heading">Almost there.</h2>
+              <p className="modal-subtitle">Enter the code sent to <strong>{verificationEmail}</strong> and pick a new password. Codes expire in {Math.max(1, Math.ceil(resetExpiresInSeconds / 60))} minutes.</p>
+              <form className="modal-form" onSubmit={(event) => void submitResetPassword(event)}>
+                <label>Reset code<input className="email-verification-code" name="code" type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} placeholder="000000" value={resetCode} onChange={(event) => setResetCode(event.target.value.replace(/\D/g, "").slice(0, 6))} required /></label>
+                <label>New password
+                  <span className="password-field">
+                    <input id="reset-password" name="password" type={resetPasswordVisible ? "text" : "password"} autoComplete="new-password" placeholder="8+ chars, letter and number" value={resetPasswordDraft} onChange={(event) => setResetPasswordDraft(event.target.value)} minLength={8} required />
+                    <button className="password-visibility-toggle" type="button" aria-label={resetPasswordVisible ? "Hide password" : "Show password"} aria-pressed={resetPasswordVisible} aria-controls="reset-password" onClick={() => setResetPasswordVisible((visible) => !visible)}>{resetPasswordVisible ? <EyeOff size={16} /> : <Eye size={16} />}</button>
+                  </span>
+                </label>
+                {error && <div className="form-error" role="alert">{error}</div>}
+                <button className="form-submit" disabled={busy || resetCode.length !== 6 || resetPasswordDraft.length < 8}>{busy ? "Saving..." : "Update password"} <ArrowRight size={15} /></button>
+              </form>
+              <div className="auth-link-row"><button type="button" disabled={busy} onClick={() => { setModal("forgot-password"); setError(""); }}>Resend password reset code</button><button type="button" onClick={() => { setAuthMode("login"); setModal("login"); setError(""); }}>Back to log in</button></div>
+            </div>
           </> : modal === "email-verification" ? <>
-            <span className="section-kicker">CHECK YOUR INBOX</span><h2 id="modal-heading">Verify your email.</h2>
-            <p className="modal-subtitle">We sent a six-digit code to <strong>{verificationEmail}</strong>. It expires in {Math.max(1, Math.ceil(verificationExpiresInSeconds / 60))} minutes. Logging in again continues here until you verify.</p>
-            <form className="modal-form" onSubmit={(event) => void verifyEmail(event)}>
-              <label>Verification code<input className="email-verification-code" name="code" type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} placeholder="000000" value={verificationCode} onChange={(event) => setVerificationCode(event.target.value.replace(/\D/g, "").slice(0, 6))} required /></label>
-              {error && <div className="form-error" role="alert">{error}</div>}
-              <button className="form-submit" disabled={busy || verificationCode.length !== 6}>{busy ? "Verifying..." : "Verify email"} <ArrowRight size={15} /></button>
-            </form>
-            <div className="auth-link-row"><button type="button" disabled={busy} onClick={() => void resendEmailVerification()}>Resend verification code</button><button type="button" onClick={() => { setAuthMode("login"); setModal("login"); setError(""); }}>Back to log in</button></div>
-            <p className="auth-legal-links"><a href="/terms" target="_blank" rel="noreferrer">Terms and Conditions</a><span>·</span><a href="/privacy" target="_blank" rel="noreferrer">Privacy Policy</a></p>
+            <div className="auth-modal-body auth-modal-body-solo">
+              <div className="modal-logo"><AudioLines size={21} /></div>
+              <span className="section-kicker">CHECK YOUR INBOX</span><h2 id="modal-heading">Verify your email.</h2>
+              <p className="modal-subtitle">We sent a six-digit code to <strong>{verificationEmail}</strong>. It expires in {Math.max(1, Math.ceil(verificationExpiresInSeconds / 60))} minutes. Logging in again continues here until you verify.</p>
+              <form className="modal-form" onSubmit={(event) => void verifyEmail(event)}>
+                <label>Verification code<input className="email-verification-code" name="code" type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} placeholder="000000" value={verificationCode} onChange={(event) => setVerificationCode(event.target.value.replace(/\D/g, "").slice(0, 6))} required /></label>
+                {error && <div className="form-error" role="alert">{error}</div>}
+                <button className="form-submit" disabled={busy || verificationCode.length !== 6}>{busy ? "Verifying..." : "Verify email"} <ArrowRight size={15} /></button>
+              </form>
+              <div className="auth-link-row"><button type="button" disabled={busy} onClick={() => void resendEmailVerification()}>Resend verification code</button><button type="button" onClick={() => { setAuthMode("login"); setModal("login"); setError(""); }}>Back to log in</button></div>
+              <p className="auth-legal-links"><a href="/terms" target="_blank" rel="noreferrer">Terms and Conditions</a><span>·</span><a href="/privacy" target="_blank" rel="noreferrer">Privacy Policy</a></p>
+            </div>
+          </> : modal === "settings" ? <>
+            <div className="auth-modal-body auth-modal-body-solo">
+              <div className="modal-logo"><Settings size={21} /></div>
+              <span className="section-kicker">YOUR ACCOUNT</span>
+              <h2 id="modal-heading">Profile &amp; settings.</h2>
+              <p className="modal-subtitle">Update how you show up on Wiloplay and manage account preferences.</p>
+              <div className="settings-summary">
+                <span className="avatar">{(user?.name ?? "W").slice(0, 1).toUpperCase()}</span>
+                <div>
+                  <strong>{user?.name}</strong>
+                  <small>{user?.email}</small>
+                  <small>{user?.role === "ARTIST" ? "Artist account" : "Listener account"}{user?.emailVerifiedAt ? " · Verified" : ""}</small>
+                </div>
+              </div>
+              <form className="modal-form auth-form" onSubmit={(event) => void submitSettings(event)}>
+                <label>Display name<input value={settingsName} onChange={(event) => setSettingsName(event.target.value)} maxLength={60} required /></label>
+                <label>City for trends <span className="wizard-optional">OPTIONAL</span><input value={cityDraft} onChange={(event) => setCityDraft(event.target.value)} placeholder="e.g. Lagos" maxLength={80} /></label>
+                <div className="settings-row">
+                  <div><strong>Appearance</strong><small>Switch between light and dark mode</small></div>
+                  <button className="theme-toggle" type="button" onClick={toggleTheme}>{theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}<span>{theme === "dark" ? "Light" : "Dark"}</span></button>
+                </div>
+                {error && <div className="form-error" role="alert">{error}</div>}
+                <button className="form-submit" type="submit">Save settings <ArrowRight size={15} /></button>
+              </form>
+              <div className="auth-link-row">
+                {user?.role === "ARTIST" && <a href={`/artist/${encodeURIComponent(user.id)}`}>Open artist profile</a>}
+                <button type="button" onClick={() => { closeModal(); logout(); }}>Sign out</button>
+              </div>
+              <p className="auth-legal-links"><a href="/terms" target="_blank" rel="noreferrer">Terms and Conditions</a><span>·</span><a href="/privacy" target="_blank" rel="noreferrer">Privacy Policy</a></p>
+            </div>
           </> : modal === "upload" ? <>
+            <div className="modal-logo"><AudioLines size={21} /></div>
             <span className="section-kicker">GET YOUR MUSIC OUT THERE</span><h2 id="modal-heading">Share a new release.</h2><p className="modal-subtitle">Upload a single or group tracks into an album with one shared cover.</p>
             <form className="modal-form wizard-form" ref={uploadFormRef} onSubmit={(event) => void uploadTrack(event)}>
               <WizardProgress steps={["Release details", "Audio & artwork", "Review"]} activeStep={uploadStep} />
@@ -2902,6 +3568,7 @@ export default function HomePage() {
               </div>
             </form>
           </> : modal === "checkout" && checkoutEvent ? <>
+            <div className="modal-logo"><Ticket size={21} /></div>
             <span className="section-kicker">TICKET CHECKOUT</span><h2 id="modal-heading">{checkoutEvent.title}</h2><p className="modal-subtitle">{formatDate(checkoutEvent.startsAt)} · {checkoutEvent.venue}, {checkoutEvent.city}</p>
             <form className="modal-form checkout-form" onSubmit={(event) => void purchaseTickets(event)}>
               <label>Ticket type<select value={selectedTicketCategoryId} onChange={(event) => setSelectedTicketCategoryId(event.target.value)} required>{checkoutEvent.ticketCategories.map((category) => <option key={category.id} value={category.id} disabled={category.capacity <= category.ticketsSold}>{category.name} · {formatPrice(category.priceCents)}{category.capacity <= category.ticketsSold ? " · Sold out" : ""}</option>)}</select></label>
@@ -2920,6 +3587,7 @@ export default function HomePage() {
               <button className="form-submit" disabled={busy || !paymentMode || Boolean(paymentModeError) || !selectedCheckoutCategory || selectedCheckoutCategory.capacity <= selectedCheckoutCategory.ticketsSold}>{busy ? paymentMode === "demo" ? "Creating demo tickets..." : "Preparing secure transfer..." : paymentMode === "demo" ? "Create demo tickets" : `Get transfer details · ${formatPrice((selectedCheckoutCategory?.priceCents ?? 0) * ticketQuantity + platformFeeCents((selectedCheckoutCategory?.priceCents ?? 0) * ticketQuantity))} `}<ArrowRight size={15} /></button>
             </form>
           </> : modal === "purchase-result" && purchaseResult ? <>
+            <div className="modal-logo"><QrCode size={21} /></div>
             <span className="section-kicker">{purchaseResult.paymentMethod === "DEMO" ? "DEMO BOOKING · NO MONEY TAKEN" : purchaseResult.paymentStatus === "PAID" ? "YOU'RE ON THE LIST" : "BOOKING RECEIVED"}</span><h2 id="modal-heading">{purchaseResult.paymentMethod === "DEMO" ? "Your demo tickets are ready." : purchaseResult.paymentStatus === "PAID" ? "Your tickets are ready." : "Transfer pending."}</h2>
             <p className="modal-subtitle">{purchaseResult.event.title} · Payment reference <code>{purchaseResult.paymentReference ?? purchaseResult.id}</code></p>
             {purchaseResult.paymentStatus === "PENDING" ? <div className="transfer-instructions"><strong>Transfer exactly {formatPrice(purchaseResult.totalCents)}</strong><p>Bank: {purchaseResult.transferBankName || "Preparing account"}<br />Account number: {purchaseResult.transferAccountNumber || "Preparing account"}<br />Account name: {purchaseResult.transferAccountName || "Preparing account"}<br />Payment reference: {purchaseResult.paymentReference || purchaseResult.id}</p><small>Tickets are issued after Paystack verifies the payment. Do not upload a receipt or send money to an artist-provided account.</small></div>
@@ -2927,6 +3595,7 @@ export default function HomePage() {
             <p className={purchaseResult.emailSent ? "check-in-success" : "email-delivery-note"} role="status">{purchaseResult.emailSent ? `QR tickets were emailed to ${user?.email}.` : purchaseResult.emailMessage}</p>
             <button className="form-submit" onClick={() => { setModal(null); setPurchaseResult(null); document.getElementById("my-tickets")?.scrollIntoView({ behavior: "smooth" }); }}>View my tickets <QrCode size={16} /></button>
           </> : <>
+            <div className="modal-logo"><CalendarDays size={21} /></div>
             <span className="section-kicker">BRING YOUR PEOPLE TOGETHER</span><h2 id="modal-heading">Put on a show.</h2><p className="modal-subtitle">Create a listing and let people find your next live night.</p>
             <form className="modal-form wizard-form" ref={eventFormRef} onSubmit={(event) => void createEvent(event)}>
               <WizardProgress steps={["Show details", "Tickets", "Preview"]} activeStep={eventStep} />

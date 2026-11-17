@@ -1,6 +1,6 @@
 # Wiloplay
 
-Wiloplay is a music discovery and artist community app built with Next.js, NestJS, PostgreSQL, and Prisma. It includes Deezer preview search, listener accounts, artist profiles, audio uploads, live event listings, and ticket reservations.
+Wiloplay is a music discovery and artist community app built with Next.js, NestJS, PostgreSQL, and Prisma. It includes a multi-provider free music catalog (Audius and Jamendo full streams, Deezer and iTunes 30s previews), listener accounts, artist profiles, audio uploads, live event listings, and ticket reservations.
 
 ## Run locally
 
@@ -25,7 +25,8 @@ The database provider is now PostgreSQL. Existing records in the previous local 
 
 - Verify the account email with a six-digit, expiring code during sign-up. Unverified users who log in or sign up again with the same password continue into verification and can resend a code. Forgot-password / reset-password codes also prove email ownership and sign the user in.
 - Follow artist profiles and view follower counts, qualified listens, popular tracks, and listener-shared city trends. A listen is recorded once per playback after 120 seconds; city sharing is optional, and artist payouts are not enabled.
-- Search Deezer's public catalog through the API and play the 30-second previews Deezer provides.
+- Search a normalized free-music catalog across Audius, Jamendo (when `JAMENDO_CLIENT_ID` is set), Deezer, and iTunes, plus first-party Wiloplay uploads.
+- Browse catalog genres and trending tracks; play full Creative Commons / open streams where available, or commercial 30-second previews otherwise.
 - Browse Deezer's current top tracks, artists, and albums from the home page.
 - Open a chart artist's profile and preview their top tracks.
 - Continue listening with a randomly selected playable track when the current track ends.
@@ -38,7 +39,7 @@ The database provider is now PostgreSQL. Existing records in the previous local 
 - See a live countdown to each show. Past shows and their tickets leave the active lists at showtime; ticket and payment records are retained.
 - Responsive discovery home, mood search, and a persistent audio player.
 
-Event prices are entered and displayed in Nigerian naira; amounts are stored and sent to Paystack in kobo. Each order includes the existing 10% Wiloplay fee in its exact transfer amount. Email verification and password-reset codes expire after 10 minutes, can be resent after one minute, and allow five attempts. New passwords require at least eight characters with a letter and a number. Separately, artist payout approval is restricted to emails in `ADMIN_EMAILS`; call `POST /payments/artists/:artistId/verify` as an allowlisted administrator. Email verification codes, ticket QR emails, and event updates require valid SMTP settings; tickets remain accessible in the user's account if email delivery fails. Paystack, SMTP, OpenAI, and Auphonic may charge for use. Keep provider keys server-side in `apps/api/.env`. Deezer preview availability and usage are governed by Deezer's API terms.
+Event prices are entered and displayed in Nigerian naira; amounts are stored and sent to Paystack in kobo. Each order includes the existing 10% Wiloplay fee in its exact transfer amount. Email verification and password-reset codes expire after 10 minutes, can be resent after one minute, and allow five attempts. New passwords require at least eight characters with a letter and a number. Separately, artist payout approval is restricted to emails in `ADMIN_EMAILS`; call `POST /payments/artists/:artistId/verify` as an allowlisted administrator. Email verification codes, ticket QR emails, and event updates require valid SMTP settings; tickets remain accessible in the user's account if email delivery fails. Paystack, SMTP, OpenAI, and Auphonic may charge for use. Keep provider keys server-side in `apps/api/.env`. Optional `JAMENDO_CLIENT_ID` unlocks Jamendo CC full streams in `/catalog`. Audius, Deezer, and iTunes Search require no API key for the endpoints Wiloplay uses. Preview and stream availability are governed by each provider's terms; respect Jamendo Creative Commons attribution when shown.
 
 ## API routes
 
@@ -58,8 +59,13 @@ The API root (`/`) returns service status and links to the health check and docu
 | `POST` | `/auth/forgot-password` | Public; emails a reset code when the account exists |
 | `POST` | `/auth/reset-password` | Public; `email`, `code`, and new `password`; verifies email if needed and signs in |
 | `POST` | `/auth/become-artist` | Signed in with a verified email |
-| `GET` | `/search?q=afrobeats` | Public; unified Wiloplay tracks, artists, shows, and Deezer preview matches |
-| `GET` | `/deezer/search?q=indie` | Public |
+| `GET` | `/search?q=afrobeats` | Public; unified Wiloplay tracks, artists, shows, and multi-provider catalog matches |
+| `GET` | `/catalog/providers` | Public; provider status (enabled / requires key) |
+| `GET` | `/catalog/genres` | Public; browseable genre list |
+| `GET` | `/catalog/genres/:genre` | Public; genre browse across enabled providers |
+| `GET` | `/catalog/search?q=indie` | Public; optional `genre`, `providers`, `limit` |
+| `GET` | `/catalog/trending` | Public; aggregated trending / popular tracks |
+| `GET` | `/deezer/search?q=indie` | Public; legacy Deezer-only search |
 | `GET` | `/deezer/chart` | Public; returns top tracks, artists, and albums |
 | `GET` | `/deezer/artists/:id` | Public; artist details and top tracks with previews |
 | `GET` | `/tracks` | Public |
