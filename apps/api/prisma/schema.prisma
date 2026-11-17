@@ -19,6 +19,10 @@ model User {
   emailVerificationExpiresAt DateTime? @map("artistVerificationExpiresAt")
   emailVerificationLastSentAt DateTime? @map("artistVerificationLastSentAt")
   emailVerificationAttempts Int @default(0) @map("artistVerificationAttempts")
+  passwordResetCodeHash String?
+  passwordResetExpiresAt DateTime?
+  passwordResetLastSentAt DateTime?
+  passwordResetAttempts Int @default(0)
   createdAt    DateTime @default(now())
   tracks       Track[]
   events       Event[]
@@ -27,6 +31,9 @@ model User {
   followers    ArtistFollow[] @relation("ArtistFollowers")
   following    ArtistFollow[] @relation("ListenerFollowing")
   listens      TrackListen[]
+  likedTracks  LikedTrack[]
+  playlists    Playlist[]
+  playbackHistory TrackPlay[]
 }
 
 model ArtistBankAccount {
@@ -61,6 +68,9 @@ model Track {
   artistId    String
   artist      User     @relation(fields: [artistId], references: [id], onDelete: Cascade)
   listens     TrackListen[]
+  likedBy     LikedTrack[]
+  playlistEntries PlaylistTrack[]
+  playbackHistory TrackPlay[]
 
   @@index([artistId, createdAt])
 }
@@ -89,6 +99,89 @@ model TrackListen {
   listener  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([trackId, createdAt])
+}
+
+model LikedTrack {
+  id              String   @id @default(cuid())
+  userId          String
+  trackId         String?
+  source          String
+  sourceTrackId   String
+  title           String
+  artistName      String
+  albumTitle      String?
+  coverUrl        String?
+  previewUrl      String?
+  deezerUrl       String?
+  duration        Int?
+  genre           String?
+  createdAt       DateTime @default(now())
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  track           Track?   @relation(fields: [trackId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, source, sourceTrackId])
+  @@index([userId, createdAt])
+  @@index([trackId, createdAt])
+}
+
+model Playlist {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  ownerId     String
+  owner       User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  tracks      PlaylistTrack[]
+
+  @@index([ownerId, updatedAt])
+}
+
+model PlaylistTrack {
+  id              String   @id @default(cuid())
+  playlistId      String
+  trackId         String?
+  source          String
+  sourceTrackId   String
+  title           String
+  artistName      String
+  albumTitle      String?
+  coverUrl        String?
+  previewUrl      String?
+  deezerUrl       String?
+  duration        Int?
+  genre           String?
+  position        Int
+  addedAt         DateTime @default(now())
+  playlist        Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+  track           Track?   @relation(fields: [trackId], references: [id], onDelete: SetNull)
+
+  @@unique([playlistId, source, sourceTrackId])
+  @@index([playlistId, position])
+  @@index([trackId])
+}
+
+model TrackPlay {
+  id              String   @id @default(cuid())
+  playbackId      String
+  userId          String
+  trackId         String?
+  source          String
+  externalTrackId String?
+  title           String
+  artistName      String
+  albumTitle      String?
+  coverUrl        String?
+  previewUrl      String?
+  deezerUrl       String?
+  duration        Int?
+  playedAt        DateTime @default(now())
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  track           Track?   @relation(fields: [trackId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, playbackId])
+  @@index([userId, playedAt])
+  @@index([trackId, playedAt])
 }
 
 model Event {

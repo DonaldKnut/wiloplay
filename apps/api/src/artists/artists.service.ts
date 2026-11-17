@@ -66,6 +66,41 @@ export class ArtistsService {
     };
   }
 
+  search(query: string) {
+    const term = query.trim().slice(0, 100);
+    if (!term) return [];
+    return this.prisma.user.findMany({
+      where: {
+        role: "ARTIST",
+        OR: [
+          { name: { contains: term, mode: "insensitive" } },
+          { tracks: { some: { artistName: { contains: term, mode: "insensitive" } } } },
+        ],
+      },
+      orderBy: { createdAt: "desc" },
+      take: 12,
+      select: {
+        id: true,
+        name: true,
+        _count: { select: { followers: true, tracks: true } },
+        tracks: {
+          orderBy: { createdAt: "desc" },
+          take: 1,
+          select: { coverUrl: true, artistName: true },
+        },
+      },
+    }).then((artists) =>
+      artists.map((artist) => ({
+        id: artist.id,
+        name: artist.name,
+        followers: artist._count.followers,
+        trackCount: artist._count.tracks,
+        coverUrl: artist.tracks[0]?.coverUrl ?? null,
+        artistName: artist.tracks[0]?.artistName ?? artist.name,
+      })),
+    );
+  }
+
   async isFollowing(listenerId: string, artistId: string) {
     await this.requireArtist(artistId);
     const follow = await this.prisma.artistFollow.findUnique({

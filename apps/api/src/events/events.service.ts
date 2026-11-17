@@ -97,6 +97,36 @@ export class EventsService {
     return events;
   }
 
+  async search(query: string) {
+    const term = query.trim().slice(0, 100);
+    if (!term) return [];
+    return this.prisma.event.findMany({
+      where: {
+        startsAt: { gte: new Date() },
+        OR: [
+          { title: { contains: term, mode: "insensitive" } },
+          { artistName: { contains: term, mode: "insensitive" } },
+          { venue: { contains: term, mode: "insensitive" } },
+          { city: { contains: term, mode: "insensitive" } },
+        ],
+      },
+      orderBy: { startsAt: "asc" },
+      take: 12,
+      select: {
+        id: true,
+        title: true,
+        artistName: true,
+        venue: true,
+        city: true,
+        startsAt: true,
+        priceCents: true,
+        capacity: true,
+        ticketsSold: true,
+        coverUrl: true,
+      },
+    });
+  }
+
   async create(artistId: string, input: CreateEventDto, cover?: Express.Multer.File) {
     if (new Date(input.startsAt).getTime() <= Date.now()) {
       if (cover) await unlink(cover.path);

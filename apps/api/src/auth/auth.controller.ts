@@ -1,7 +1,14 @@
 import { Body, Controller, Post, Req, UseGuards } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { AuthService } from "./auth.service";
-import { LoginDto, RegisterDto, VerifyEmailDto } from "./auth.dto";
+import {
+  ForgotPasswordDto,
+  LoginDto,
+  RegisterDto,
+  ResendEmailVerificationDto,
+  ResetPasswordDto,
+  VerifyEmailDto,
+} from "./auth.dto";
 import { AuthenticatedRequest, JwtAuthGuard } from "./jwt-auth.guard";
 
 @ApiTags("Authentication")
@@ -19,11 +26,26 @@ export class AuthController {
     return this.auth.login(input);
   }
 
+  @Post("resend-email-verification")
+  resendEmailVerification(@Body() input: ResendEmailVerificationDto) {
+    return this.auth.resendEmailVerification(input);
+  }
+
   @Post("request-email-verification")
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   requestEmailVerification(@Req() request: AuthenticatedRequest) {
     return this.auth.requestEmailVerificationForUser(request.user.sub);
+  }
+
+  @Post("forgot-password")
+  forgotPassword(@Body() input: ForgotPasswordDto) {
+    return this.auth.forgotPassword(input);
+  }
+
+  @Post("reset-password")
+  resetPassword(@Body() input: ResetPasswordDto) {
+    return this.auth.resetPassword(input);
   }
 
   @Post("become-artist")

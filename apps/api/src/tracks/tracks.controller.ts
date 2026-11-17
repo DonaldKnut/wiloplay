@@ -45,6 +45,16 @@ export class TracksController {
     return this.tracks.list();
   }
 
+  @Get("albums")
+  albums() {
+    return this.tracks.listAlbums();
+  }
+
+  @Get("albums/:id")
+  album(@Param("id") id: string) {
+    return this.tracks.getAlbum(id);
+  }
+
   @Get("mine")
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, ArtistGuard)

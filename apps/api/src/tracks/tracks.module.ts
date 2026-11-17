@@ -10,5 +10,6 @@ import { AiTracksService } from "./ai-tracks.service";
   imports: [AuthModule],
   controllers: [TracksController],
   providers: [ArtistGuard, JwtAuthGuard, TracksService, AiTracksService],
+  exports: [TracksService],
 })
 export class TracksModule {}

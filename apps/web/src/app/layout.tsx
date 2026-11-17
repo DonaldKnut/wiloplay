@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import ThemeInitializer from "./theme-initializer";
 import "./globals.css";
 import "./wiloplay-theme.css";
 
@@ -6,7 +7,18 @@ export const metadata: Metadata = {
   title: "Wiloplay — music finds its people",
   description:
     "Discover your next favorite song, support the artists you love, and find your people at a live show.",
+  icons: { icon: "/icon.svg" },
 };
+
+const themeBootScript = `(() => {
+  try {
+    const stored = localStorage.getItem("wiloplay-theme");
+    const prefersLight = window.matchMedia("(prefers-color-scheme: light)").matches;
+    const theme = stored === "light" || stored === "dark" ? stored : (prefersLight ? "light" : "dark");
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.style.colorScheme = theme;
+  } catch (_) {}
+})();`;
 
 export default function RootLayout({
   children,
@@ -14,8 +26,14 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body>{children}</body>
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeBootScript }} />
+      </head>
+      <body>
+        <ThemeInitializer />
+        {children}
+      </body>
     </html>
   );
 }

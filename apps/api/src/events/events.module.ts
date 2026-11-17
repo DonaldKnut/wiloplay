@@ -13,5 +13,6 @@ import { TicketEmailService } from "./ticket-email.service";
   imports: [AuthModule],
   controllers: [EventsController, PaymentsController],
   providers: [ArtistGuard, JwtAuthGuard, AdminGuard, EventsService, PaystackService, TicketEmailService],
+  exports: [EventsService],
 })
 export class EventsModule {}

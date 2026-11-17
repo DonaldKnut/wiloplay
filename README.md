@@ -23,7 +23,7 @@ The database provider is now PostgreSQL. Existing records in the previous local 
 
 ## Features
 
-- Verify the account email with a six-digit, expiring code during sign-up or the next sign-in; use the verified account for listener and artist features.
+- Verify the account email with a six-digit, expiring code during sign-up. Unverified users who log in or sign up again with the same password continue into verification and can resend a code. Forgot-password / reset-password codes also prove email ownership and sign the user in.
 - Follow artist profiles and view follower counts, qualified listens, popular tracks, and listener-shared city trends. A listen is recorded once per playback after 120 seconds; city sharing is optional, and artist payouts are not enabled.
 - Search Deezer's public catalog through the API and play the 30-second previews Deezer provides.
 - Browse Deezer's current top tracks, artists, and albums from the home page.
@@ -38,7 +38,7 @@ The database provider is now PostgreSQL. Existing records in the previous local 
 - See a live countdown to each show. Past shows and their tickets leave the active lists at showtime; ticket and payment records are retained.
 - Responsive discovery home, mood search, and a persistent audio player.
 
-Event prices are entered and displayed in Nigerian naira; amounts are stored and sent to Paystack in kobo. Each order includes the existing 10% Wiloplay fee in its exact transfer amount. Email verification codes expire after 10 minutes, can be resent after one minute, and allow five attempts. Separately, artist payout approval is restricted to emails in `ADMIN_EMAILS`; call `POST /payments/artists/:artistId/verify` as an allowlisted administrator. Email verification codes, ticket QR emails, and event updates require valid SMTP settings; tickets remain accessible in the user's account if email delivery fails. Paystack, SMTP, OpenAI, and Auphonic may charge for use. Keep provider keys server-side in `apps/api/.env`. Deezer preview availability and usage are governed by Deezer's API terms.
+Event prices are entered and displayed in Nigerian naira; amounts are stored and sent to Paystack in kobo. Each order includes the existing 10% Wiloplay fee in its exact transfer amount. Email verification and password-reset codes expire after 10 minutes, can be resent after one minute, and allow five attempts. New passwords require at least eight characters with a letter and a number. Separately, artist payout approval is restricted to emails in `ADMIN_EMAILS`; call `POST /payments/artists/:artistId/verify` as an allowlisted administrator. Email verification codes, ticket QR emails, and event updates require valid SMTP settings; tickets remain accessible in the user's account if email delivery fails. Paystack, SMTP, OpenAI, and Auphonic may charge for use. Keep provider keys server-side in `apps/api/.env`. Deezer preview availability and usage are governed by Deezer's API terms.
 
 ## API routes
 
@@ -50,11 +50,15 @@ The API root (`/`) returns service status and links to the health check and docu
 | `GET` | `/health` | Public; API process health |
 | `GET` | `/docs` | Public; interactive Swagger UI |
 | `GET` | `/docs-json` | Public; OpenAPI specification |
-| `POST` | `/auth/signup` | Public; creates an account and emails a six-digit verification code |
+| `POST` | `/auth/signup` | Public; creates an account and emails a six-digit verification code; unverified accounts continue verification |
 | `POST` | `/auth/login` | Public; sends a verification code if the email is not verified |
+| `POST` | `/auth/resend-email-verification` | Public; `email` + `password`; resends a verification code |
 | `POST` | `/auth/request-email-verification` | Signed in; requests a code for legacy sessions |
 | `POST` | `/auth/verify-email` | Public; accepts `email` and the six-digit `code` |
+| `POST` | `/auth/forgot-password` | Public; emails a reset code when the account exists |
+| `POST` | `/auth/reset-password` | Public; `email`, `code`, and new `password`; verifies email if needed and signs in |
 | `POST` | `/auth/become-artist` | Signed in with a verified email |
+| `GET` | `/search?q=afrobeats` | Public; unified Wiloplay tracks, artists, shows, and Deezer preview matches |
 | `GET` | `/deezer/search?q=indie` | Public |
 | `GET` | `/deezer/chart` | Public; returns top tracks, artists, and albums |
 | `GET` | `/deezer/artists/:id` | Public; artist details and top tracks with previews |

@@ -20,6 +20,7 @@ import {
   ImagePlus,
   LogOut,
   Link2,
+  ListMusic,
   MapPin,
   Menu,
   Mic2,
@@ -29,21 +30,28 @@ import {
   Play,
   Plus,
   Pencil,
+  Repeat,
   Search,
+  Shuffle,
+  Sun,
+  Moon,
   Ticket,
   ScanLine,
   CalendarDays,
   Clock3,
+  RefreshCw,
   Trash2,
   Upload,
   Users,
   Volume2,
   X,
 } from "lucide-react";
+import { applyTheme, resolveTheme, type WiloplayTheme } from "./theme-initializer";
 import {
   FormEvent,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -68,6 +76,52 @@ type Track = {
   releaseType?: "SINGLE" | "ALBUM";
   deezerUrl?: string;
 };
+
+type ApiTrack = {
+  id: string;
+  artistId: string;
+  title: string;
+  artistName: string;
+  audioUrl: string;
+  coverUrl: string | null;
+  genre: string;
+  releaseType: "SINGLE" | "ALBUM";
+  albumTitle: string | null;
+  releaseDescription: string | null;
+  enhancedAudioUrl?: string | null;
+  aiProductionStatus?: string | null;
+  duration: number | null;
+};
+
+type LibraryEntry = {
+  id?: string;
+  source: "UPLOAD" | "DEEZER";
+  sourceTrackId?: string;
+  externalTrackId?: string | null;
+  title: string;
+  artistName: string;
+  albumTitle?: string | null;
+  coverUrl?: string | null;
+  previewUrl?: string | null;
+  deezerUrl?: string | null;
+  duration?: number | null;
+  genre?: string | null;
+  track?: ApiTrack | null;
+  playedAt?: string;
+};
+
+type Playlist = {
+  id: string;
+  name: string;
+  description: string | null;
+  _count?: { tracks: number };
+};
+
+type PlaylistDetails = Playlist & {
+  tracks: (LibraryEntry & { position: number })[];
+};
+
+type PlaylistDialog = { mode: "create" | "add"; track: Track | null } | null;
 
 type ChartArtist = {
   id: number;
@@ -202,50 +256,52 @@ type PurchaseResult = TicketOrder & {
   emailMessage?: string;
 };
 type PaymentMode = "demo" | "paystack";
-type Modal = "login" | "signup" | "email-verification" | "upload" | "event" | "checkout" | "purchase-result" | null;
+type Modal = "login" | "signup" | "email-verification" | "forgot-password" | "reset-password" | "upload" | "event" | "checkout" | "purchase-result" | null;
+type PasswordResetChallenge = {
+  accepted: true;
+  email: string;
+  message: string;
+  expiresInSeconds?: number;
+  sent?: boolean;
+};
+type SearchArtistHit = {
+  id: string;
+  name: string;
+  followers: number;
+  trackCount: number;
+  coverUrl: string | null;
+  artistName: string;
+};
+type SearchEventHit = {
+  id: string;
+  title: string;
+  artistName: string;
+  venue: string;
+  city: string;
+  startsAt: string;
+  priceCents: number;
+  capacity: number;
+  ticketsSold: number;
+  coverUrl: string | null;
+};
+type SearchResponse = {
+  query: string;
+  tracks: ApiTrack[];
+  artists: SearchArtistHit[];
+  events: SearchEventHit[];
+  deezerTracks: Track[];
+  totals: {
+    tracks: number;
+    artists: number;
+    events: number;
+    deezerTracks: number;
+    all: number;
+  };
+};
+type SearchFilter = "all" | "wiloplay" | "deezer" | "artists" | "shows";
 type BarcodeDetectorConstructor = new (options: { formats: string[] }) => {
   detect(video: HTMLVideoElement): Promise<{ rawValue: string }[]>;
 };
-
-const formats: Track[][] = [
-  [
-    {
-      id: "fallback-1",
-      title: "Midnight City",
-      artist: "M83",
-      album: "Hurry Up, We're Dreaming",
-      cover: "https://images.unsplash.com/photo-1519608487953-e999c86e7455?w=400&h=400&fit=crop",
-    },
-    {
-      id: "fallback-2",
-      title: "Borderline",
-      artist: "Tame Impala",
-      album: "The Slow Rush",
-      cover: "https://images.unsplash.com/photo-1493246507139-91e8fad9978e?w=400&h=400&fit=crop",
-    },
-    {
-      id: "fallback-3",
-      title: "Good Luck, Babe!",
-      artist: "Chappell Roan",
-      album: "Single",
-      cover: "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400&h=400&fit=crop",
-    },
-    {
-      id: "fallback-4",
-      title: "Tadow",
-      artist: "Masego & FKJ",
-      album: "Lady Lady",
-      cover: "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=400&h=400&fit=crop",
-    },
-    {
-      id: "fallback-5",
-      title: "Sunset Lover",
-      artist: "Petit Biscuit",
-      album: "Presence",
-      cover: "https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?w=400&h=400&fit=crop",
-    },
-  ],
-];
 
 const moods = [
   {
@@ -295,6 +351,13 @@ const musicGenres = [
   "Other",
 ];
 
+class ApiRequestError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = "ApiRequestError";
+  }
+}
+
 async function request<T>(
   path: string,
   token?: string | null,
@@ -308,14 +371,96 @@ async function request<T>(
   const response = await fetch(`${API}${path}`, { ...init, headers });
   if (!response.ok) {
     const body = await response.json().catch(() => null);
-    throw new Error(body?.message ?? "Something went wrong. Please try again.");
+    const rawMessage = body?.message;
+    const message = Array.isArray(rawMessage)
+      ? rawMessage.filter((item): item is string => typeof item === "string").join(" ")
+      : typeof rawMessage === "string"
+        ? rawMessage
+        : response.status === 401
+          ? "Your sign-in details could not be verified."
+          : "Something went wrong. Please try again.";
+    throw new ApiRequestError(message, response.status);
   }
   return response.json() as Promise<T>;
+}
+
+function authErrorMessage(reason: unknown, fallback: string) {
+  if (
+    reason instanceof TypeError
+    || (reason instanceof Error && /failed to fetch|networkerror/i.test(reason.message))
+  ) {
+    return "We couldn't reach Wiloplay. Check your connection and try again.";
+  }
+  if (reason instanceof ApiRequestError && reason.status === 429) {
+    return "Too many attempts. Please wait a moment before trying again.";
+  }
+  if (reason instanceof ApiRequestError && reason.status >= 500) {
+    return reason.message && reason.message !== "Something went wrong. Please try again."
+      ? `${reason.message} Please try again shortly.`
+      : "Wiloplay couldn't complete this request right now. Please try again shortly.";
+  }
+  return reason instanceof Error ? reason.message : fallback;
 }
 
 function formatTime(seconds?: number) {
   if (!seconds) return "—:—";
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+function apiTrackToPlayerTrack(track: ApiTrack): Track {
+  return {
+    id: track.id,
+    artistProfileId: track.artistId,
+    title: track.title,
+    artist: track.artistName,
+    cover: track.coverUrl ? `${API}${track.coverUrl}` : "",
+    audioUrl: `${API}${track.enhancedAudioUrl ?? track.audioUrl}`,
+    enhancedAudioUrl: track.enhancedAudioUrl ? `${API}${track.enhancedAudioUrl}` : null,
+    duration: track.duration ?? undefined,
+    genre: track.genre,
+    releaseType: track.releaseType,
+    albumTitle: track.albumTitle,
+    releaseDescription: track.releaseDescription,
+  };
+}
+
+function libraryEntryToPlayerTrack(entry: LibraryEntry): Track {
+  if (entry.track) return apiTrackToPlayerTrack(entry.track);
+  const externalId = entry.sourceTrackId ?? entry.externalTrackId ?? "";
+  return {
+    id: entry.source === "DEEZER" ? Number(externalId) : externalId,
+    title: entry.title,
+    artist: entry.artistName,
+    album: entry.albumTitle ?? undefined,
+    cover: entry.coverUrl ?? "",
+    preview: entry.previewUrl ?? undefined,
+    deezerUrl: entry.deezerUrl ?? undefined,
+    duration: entry.duration ?? undefined,
+    genre: entry.genre ?? undefined,
+  };
+}
+
+function libraryTrackKey(track: Track) {
+  return `${typeof track.id === "number" || track.preview ? "DEEZER" : "UPLOAD"}:${track.id}`;
+}
+
+function libraryTrackPayload(track: Track) {
+  if (typeof track.id === "string" && !track.preview) {
+    return { source: "UPLOAD" as const, trackId: track.id };
+  }
+  if (!track.preview) throw new Error("This Deezer track has no playable preview.");
+  return {
+    source: "DEEZER" as const,
+    externalTrackId: String(track.id),
+    title: track.title,
+    artistName: track.artist,
+    albumTitle: track.album ?? track.albumTitle ?? undefined,
+    coverUrl: track.cover || undefined,
+    previewUrl: track.preview,
+    deezerUrl: track.deezerUrl,
+    duration: track.duration && track.duration > 0 ? track.duration : undefined,
+    genre: track.genre,
+  };
 }
 
 function formatDate(value: string) {
@@ -406,13 +551,32 @@ function WizardProgress({ steps, activeStep }: { steps: string[]; activeStep: nu
 }
 
 export default function HomePage() {
-  const [tracks, setTracks] = useState<Track[]>(formats[0]);
+  const [tracks, setTracks] = useState<Track[]>([]);
   const [chart, setChart] = useState<DeezerChart | null>(null);
   const [chartError, setChartError] = useState("");
+  const [chartLoading, setChartLoading] = useState(true);
+  const [searchError, setSearchError] = useState("");
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchResults, setSearchResults] = useState<SearchResponse | null>(null);
+  const [searchFilter, setSearchFilter] = useState<SearchFilter>("all");
   const [artistDetails, setArtistDetails] = useState<ArtistDetails | null>(null);
   const [loadingArtistId, setLoadingArtistId] = useState<number | null>(null);
   const [artistDetailsError, setArtistDetailsError] = useState("");
   const [uploadedTracks, setUploadedTracks] = useState<Track[]>([]);
+  const [likedTracks, setLikedTracks] = useState<Track[]>([]);
+  const [likedTrackKeys, setLikedTrackKeys] = useState<string[]>([]);
+  const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  const [playlistDetails, setPlaylistDetails] = useState<PlaylistDetails | null>(null);
+  const [listeningHistory, setListeningHistory] = useState<Track[]>([]);
+  const [recommendations, setRecommendations] = useState<Track[]>([]);
+  const [libraryTab, setLibraryTab] = useState<"recommendations" | "liked" | "history" | "playlist">("recommendations");
+  const [libraryLoading, setLibraryLoading] = useState(false);
+  const [libraryError, setLibraryError] = useState("");
+  const [playlistDialog, setPlaylistDialog] = useState<PlaylistDialog>(null);
+  const [playlistNameDraft, setPlaylistNameDraft] = useState("");
+  const [playlistDescriptionDraft, setPlaylistDescriptionDraft] = useState("");
+  const [playlistChoiceId, setPlaylistChoiceId] = useState("");
+  const [libraryBusy, setLibraryBusy] = useState(false);
   const [events, setEvents] = useState<EventItem[]>([]);
   const [myTicketOrders, setMyTicketOrders] = useState<TicketOrder[]>([]);
   const [artistEvents, setArtistEvents] = useState<ArtistEvent[]>([]);
@@ -461,7 +625,12 @@ export default function HomePage() {
   const [checkInError, setCheckInError] = useState("");
   const [scannerOpen, setScannerOpen] = useState(false);
   const [current, setCurrent] = useState<Track | null>(null);
+  const [queue, setQueue] = useState<Track[]>([]);
   const [playing, setPlaying] = useState(false);
+  const [shuffle, setShuffle] = useState(false);
+  const [repeatMode, setRepeatMode] = useState<"off" | "all" | "one">("off");
+  const [volume, setVolume] = useState(0.75);
+  const [queueOpen, setQueueOpen] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [mediaDuration, setMediaDuration] = useState(0);
   const [now, setNow] = useState(() => Date.now());
@@ -472,11 +641,16 @@ export default function HomePage() {
   const [activeNav, setActiveNav] = useState<
     "home" | "discovery" | "for-you" | "shows" | "my-tickets"
   >("home");
+  const [theme, setTheme] = useState<WiloplayTheme>("dark");
   const [modal, setModal] = useState<Modal>(null);
   const [authMode, setAuthMode] = useState<"login" | "signup">("signup");
   const [authDraft, setAuthDraft] = useState({ name: "", email: "", password: "" });
   const [verificationEmail, setVerificationEmail] = useState("");
   const [verificationCode, setVerificationCode] = useState("");
+  const [verificationPassword, setVerificationPassword] = useState("");
+  const [resetCode, setResetCode] = useState("");
+  const [resetPasswordDraft, setResetPasswordDraft] = useState("");
+  const [resetExpiresInSeconds, setResetExpiresInSeconds] = useState(600);
   const [verificationExpiresInSeconds, setVerificationExpiresInSeconds] = useState(0);
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
@@ -492,6 +666,7 @@ export default function HomePage() {
   const artistDetailsRequestId = useRef(0);
   const countedListenTrackId = useRef<string | null>(null);
   const listenPlaybackId = useRef("");
+  const historySavedPlaybackId = useRef<string | null>(null);
 
   useEffect(() => {
     const sectionIds: (typeof activeNav)[] = [
@@ -657,30 +832,92 @@ export default function HomePage() {
     }
   }, []);
 
+  const loadListenerLibrary = useCallback(async () => {
+    if (!token) {
+      setLikedTracks([]);
+      setLikedTrackKeys([]);
+      setPlaylists([]);
+      setPlaylistDetails(null);
+      setListeningHistory([]);
+      setRecommendations([]);
+      setLibraryError("");
+      return;
+    }
+
+    setLibraryLoading(true);
+    try {
+      const [likes, history, savedPlaylists, suggested] = await Promise.all([
+        request<LibraryEntry[]>("/library/likes", token),
+        request<LibraryEntry[]>("/library/history", token),
+        request<Playlist[]>("/playlists", token),
+        request<ApiTrack[]>("/library/recommendations", token),
+      ]);
+      setLikedTracks(likes.map(libraryEntryToPlayerTrack));
+      setLikedTrackKeys(likes.map((entry) =>
+        `${entry.source}:${entry.sourceTrackId ?? entry.externalTrackId ?? entry.track?.id ?? ""}`,
+      ));
+      setListeningHistory(history.map(libraryEntryToPlayerTrack));
+      setPlaylists(savedPlaylists);
+      setPlaylistChoiceId((selected) =>
+        savedPlaylists.some((item) => item.id === selected)
+          ? selected
+          : savedPlaylists[0]?.id ?? "",
+      );
+      setRecommendations(suggested.map(apiTrackToPlayerTrack));
+      setLibraryError("");
+    } catch (reason) {
+      setLibraryError(reason instanceof Error
+        ? reason.message
+        : "Your listening library could not be loaded.");
+    } finally {
+      setLibraryLoading(false);
+    }
+  }, [token]);
+
   const searchTracks = useCallback(async (term: string) => {
+    setSearchError("");
+    setSearchFilter("all");
     if (!term.trim()) {
-      setTracks(formats[0]);
+      setTracks([]);
+      setSearchResults(null);
+      setSearchLoading(false);
       setError("");
       return;
     }
+    setSearchLoading(true);
+    setSearchOpen(true);
     try {
-      const results = await request<
-        { id: number; title: string; artist: string; album: string; cover: string; preview?: string; duration: number; deezerUrl: string }[]
-      >(`/deezer/search?q=${encodeURIComponent(term.trim())}`);
-      setTracks(results.map((item) => ({ ...item, id: item.id, duration: Math.min(item.duration, 30) })));
+      const results = await request<SearchResponse>(`/search?q=${encodeURIComponent(term.trim())}`);
+      const deezerTracks = results.deezerTracks.map((item) => ({
+        ...item,
+        duration: Math.min(item.duration ?? 30, 30),
+      }));
+      setSearchResults({ ...results, deezerTracks });
+      setTracks(deezerTracks);
       setError("");
+      if (!results.totals.all) {
+        setSearchError("Nothing matched that search yet. Try another artist, song, mood, or city.");
+      }
     } catch {
-      setError("Music search is unavailable. Check that the API is running.");
+      setTracks([]);
+      setSearchResults(null);
+      setSearchError("Search is having a quiet moment. Your Wiloplay artist releases are still here.");
+    } finally {
+      setSearchLoading(false);
     }
   }, []);
 
   const loadChart = useCallback(async () => {
+    setChartLoading(true);
+    setChartError("");
     try {
       const results = await request<DeezerChart>("/deezer/chart");
       setChart(results);
-      setChartError("");
     } catch {
-      setChartError("Deezer charts are unavailable right now. Please try again later.");
+      setChart(null);
+      setChartError("The charts are taking a breather. Explore Wiloplay artist releases while they load back in.");
+    } finally {
+      setChartLoading(false);
     }
   }, []);
 
@@ -702,6 +939,12 @@ export default function HomePage() {
   }
 
   useEffect(() => {
+    const initialTheme = resolveTheme(
+      localStorage.getItem("wiloplay-theme"),
+      window.matchMedia("(prefers-color-scheme: light)").matches,
+    );
+    setTheme(initialTheme);
+    applyTheme(initialTheme);
     const savedToken = localStorage.getItem("sonora-token");
     const savedUser = localStorage.getItem("sonora-user");
     const savedCity = localStorage.getItem("wiloplay-listener-city") ?? "";
@@ -752,6 +995,7 @@ export default function HomePage() {
   useEffect(() => {
     if (!token || !user) return;
     void loadMyTicketOrders();
+    void loadListenerLibrary();
     if (user.role === "ARTIST") {
       void loadArtistEvents();
       void loadArtistBankAccount();
@@ -760,7 +1004,7 @@ export default function HomePage() {
         setError(reason instanceof Error ? reason.message : "AI tools could not be checked.");
       });
     }
-  }, [loadArtistBankAccount, loadArtistEvents, loadArtistTracks, loadMyTicketOrders, token, user]);
+  }, [loadArtistBankAccount, loadArtistEvents, loadArtistTracks, loadListenerLibrary, loadMyTicketOrders, token, user]);
 
   useEffect(() => {
     const starts = [
@@ -893,6 +1137,10 @@ export default function HomePage() {
   }, [current]);
 
   useEffect(() => {
+    if (audioRef.current) audioRef.current.volume = volume;
+  }, [volume]);
+
+  useEffect(() => {
     countedListenTrackId.current = null;
     listenPlaybackId.current = crypto.randomUUID();
   }, [current?.id]);
@@ -915,6 +1163,205 @@ export default function HomePage() {
   function showMessage(message: string) {
     setNotice(message);
     window.setTimeout(() => setNotice(""), 3800);
+  }
+
+  function recordPlaybackHistory() {
+    if (!token || !current || historySavedPlaybackId.current === listenPlaybackId.current) return;
+    let payload: ReturnType<typeof libraryTrackPayload>;
+    try {
+      payload = libraryTrackPayload(current);
+    } catch {
+      return;
+    }
+
+    const playbackId = listenPlaybackId.current;
+    historySavedPlaybackId.current = playbackId;
+    void request<LibraryEntry>("/library/history", token, {
+      method: "POST",
+      body: JSON.stringify({ ...payload, playbackId }),
+    }).then((entry) => {
+      setListeningHistory((old) => [libraryEntryToPlayerTrack(entry), ...old].slice(0, 50));
+    }).catch((reason: unknown) => {
+      historySavedPlaybackId.current = null;
+      setLibraryError(reason instanceof Error
+        ? reason.message
+        : "Listening history could not be saved.");
+    });
+  }
+
+  function requireListenerSession() {
+    if (token) return true;
+    setAuthMode("login");
+    setModal("login");
+    showMessage("Sign in to save music to your library.");
+    return false;
+  }
+
+  async function toggleLikeTrack(track: Track) {
+    if (!requireListenerSession() || libraryBusy) return;
+    const key = libraryTrackKey(track);
+    const separator = key.indexOf(":");
+    const source = key.slice(0, separator);
+    const sourceTrackId = key.slice(separator + 1);
+    const isLiked = likedTrackKeys.includes(key);
+    setLibraryBusy(true);
+    setLibraryError("");
+    try {
+      if (isLiked) {
+        await request<{ liked: boolean }>(
+          `/library/likes/${source}/${encodeURIComponent(sourceTrackId)}`,
+          token,
+          { method: "DELETE" },
+        );
+        setLikedTrackKeys((old) => old.filter((item) => item !== key));
+        setLikedTracks((old) => old.filter((item) => libraryTrackKey(item) !== key));
+        showMessage("Removed from your liked songs.");
+      } else {
+        const payload = libraryTrackPayload(track);
+        await request<{ liked: boolean }>("/library/likes", token, {
+          method: "PUT",
+          body: JSON.stringify(payload),
+        });
+        setLikedTrackKeys((old) => old.includes(key) ? old : [key, ...old]);
+        setLikedTracks((old) => [track, ...old.filter((item) => libraryTrackKey(item) !== key)]);
+        showMessage("Saved to your liked songs.");
+      }
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : "Your library could not be updated.";
+      setLibraryError(message);
+      showMessage(message);
+    } finally {
+      setLibraryBusy(false);
+    }
+  }
+
+  function openPlaylistDialog(track: Track | null = null) {
+    if (!requireListenerSession()) return;
+    setPlaylistDialog({
+      mode: track && playlists.length ? "add" : "create",
+      track,
+    });
+    setPlaylistNameDraft("");
+    setPlaylistDescriptionDraft("");
+    setPlaylistChoiceId(playlists[0]?.id ?? "");
+    setLibraryError("");
+  }
+
+  async function addTrackToPlaylist(playlistId: string, track: Track) {
+    const result = await request<{ added: boolean }>(
+      `/playlists/${encodeURIComponent(playlistId)}/tracks`,
+      token,
+      {
+        method: "POST",
+        body: JSON.stringify(libraryTrackPayload(track)),
+      },
+    );
+    if (result.added) {
+      await loadListenerLibrary();
+      showMessage("Added to your playlist.");
+    } else {
+      showMessage("That track is already in this playlist.");
+    }
+  }
+
+  async function submitPlaylistDialog(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!token || !playlistDialog || libraryBusy) return;
+    setLibraryBusy(true);
+    setLibraryError("");
+    try {
+      let destinationPlaylistId: string | null = null;
+      if (playlistDialog.mode === "create") {
+        const created = await request<Playlist>("/playlists", token, {
+          method: "POST",
+          body: JSON.stringify({
+            name: playlistNameDraft,
+            description: playlistDescriptionDraft || undefined,
+          }),
+        });
+        setPlaylists((old) => [created, ...old]);
+        destinationPlaylistId = created.id;
+        if (playlistDialog.track) await addTrackToPlaylist(created.id, playlistDialog.track);
+        else showMessage("Your playlist is ready.");
+      } else if (playlistDialog.track && playlistChoiceId) {
+        await addTrackToPlaylist(playlistChoiceId, playlistDialog.track);
+        destinationPlaylistId = playlistChoiceId;
+      }
+      if (destinationPlaylistId) await showPlaylist(destinationPlaylistId);
+      setPlaylistDialog(null);
+      setPlaylistNameDraft("");
+      setPlaylistDescriptionDraft("");
+    } catch (reason) {
+      setLibraryError(reason instanceof Error ? reason.message : "The playlist could not be updated.");
+    } finally {
+      setLibraryBusy(false);
+    }
+  }
+
+  async function showPlaylist(playlistId: string) {
+    if (!requireListenerSession()) return;
+    setLibraryLoading(true);
+    setLibraryError("");
+    try {
+      const details = await request<PlaylistDetails>(
+        `/playlists/${encodeURIComponent(playlistId)}`,
+        token,
+      );
+      setPlaylistDetails(details);
+      setLibraryTab("playlist");
+      window.setTimeout(() => document.getElementById("library")?.scrollIntoView({ behavior: "smooth" }), 0);
+    } catch (reason) {
+      setLibraryError(reason instanceof Error ? reason.message : "That playlist could not be opened.");
+    } finally {
+      setLibraryLoading(false);
+    }
+  }
+
+  async function removePlaylistTrack(track: Track) {
+    if (!token || !playlistDetails) return;
+    const key = libraryTrackKey(track);
+    const separator = key.indexOf(":");
+    const source = key.slice(0, separator);
+    const sourceTrackId = key.slice(separator + 1);
+    setLibraryBusy(true);
+    setLibraryError("");
+    try {
+      await request<{ removed: boolean }>(
+        `/playlists/${encodeURIComponent(playlistDetails.id)}/tracks/${source}/${encodeURIComponent(sourceTrackId)}`,
+        token,
+        { method: "DELETE" },
+      );
+      await showPlaylist(playlistDetails.id);
+      await loadListenerLibrary();
+    } catch (reason) {
+      setLibraryError(reason instanceof Error ? reason.message : "The track could not be removed.");
+    } finally {
+      setLibraryBusy(false);
+    }
+  }
+
+  async function deleteCurrentPlaylist() {
+    if (!token || !playlistDetails || !window.confirm(`Delete "${playlistDetails.name}"?`)) return;
+    const playlistId = playlistDetails.id;
+    setLibraryBusy(true);
+    setLibraryError("");
+    try {
+      await request(`/playlists/${encodeURIComponent(playlistId)}`, token, { method: "DELETE" });
+      setPlaylistDetails(null);
+      setPlaylists((old) => old.filter((item) => item.id !== playlistId));
+      setLibraryTab("recommendations");
+      showMessage("Playlist deleted.");
+    } catch (reason) {
+      setLibraryError(reason instanceof Error ? reason.message : "The playlist could not be deleted.");
+    } finally {
+      setLibraryBusy(false);
+    }
+  }
+
+  function openLibraryTab(tab: "recommendations" | "liked" | "history") {
+    if (!requireListenerSession()) return;
+    setLibraryTab(tab);
+    document.getElementById("library")?.scrollIntoView({ behavior: "smooth" });
   }
 
   function recordQualifiedListen(audio: HTMLAudioElement) {
@@ -993,36 +1440,73 @@ export default function HomePage() {
     setError("");
     setPurchaseResult(null);
     if (modal === "email-verification") {
-      setAuthDraft((draft) => ({ ...draft, password: "" }));
       setVerificationCode("");
       if (token && !user?.emailVerifiedAt) logout();
     }
+    if (modal === "reset-password" || modal === "forgot-password") {
+      setResetCode("");
+      setResetPasswordDraft("");
+    }
+  }
+
+  function toggleTheme() {
+    const nextTheme: WiloplayTheme = theme === "dark" ? "light" : "dark";
+    setTheme(nextTheme);
+    applyTheme(nextTheme);
+    localStorage.setItem("wiloplay-theme", nextTheme);
+  }
+
+  function openEmailVerification(challenge: EmailVerificationChallenge, password?: string) {
+    setVerificationEmail(challenge.email);
+    setVerificationExpiresInSeconds(challenge.expiresInSeconds);
+    setVerificationCode("");
+    if (password) setVerificationPassword(password);
+    setAuthDraft((draft) => ({
+      ...draft,
+      email: challenge.email,
+      password: password || draft.password || verificationPassword,
+    }));
+    setModal("email-verification");
+    showMessage(challenge.sent
+      ? `A verification code was sent to ${challenge.email}.`
+      : `Enter the code already sent to ${challenge.email}, or resend in a minute.`);
   }
 
   async function handleAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
     setBusy(true);
-    const data = Object.fromEntries(new FormData(event.currentTarget).entries());
+    const formData = Object.fromEntries(new FormData(event.currentTarget).entries());
+    const password = String(formData.password ?? "");
+    const payload = authMode === "signup"
+      ? {
+          name: String(formData.name ?? ""),
+          email: String(formData.email ?? ""),
+          password,
+        }
+      : {
+          email: String(formData.email ?? ""),
+          password,
+        };
     try {
       const result = await request<AuthResponse>(
         `/auth/${authMode}`,
         null,
-        { method: "POST", body: JSON.stringify(data) },
+        { method: "POST", body: JSON.stringify(payload) },
       );
       if ("verificationRequired" in result) {
-        setVerificationEmail(result.email);
-        setVerificationExpiresInSeconds(result.expiresInSeconds);
-        setVerificationCode("");
-        setModal("email-verification");
-        showMessage(result.sent
-          ? `A verification code was sent to ${result.email}.`
-          : `A verification code was already sent to ${result.email}.`);
+        openEmailVerification(result, password);
         return;
       }
       establishSession(result, `You're in, ${result.user.name.split(" ")[0]}. Welcome to Wiloplay.`);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Unable to sign in.");
+      if (reason instanceof ApiRequestError && reason.status === 401 && authMode === "login") {
+        setError("That email and password don't match. Check your details or use Forgot password to reset it.");
+      } else if (reason instanceof ApiRequestError && reason.status === 409 && authMode === "signup") {
+        setError("An account with that email already exists. Log in or reset your password instead.");
+      } else {
+        setError(authErrorMessage(reason, "We couldn't complete sign in. Please try again."));
+      }
     } finally {
       setBusy(false);
     }
@@ -1034,52 +1518,53 @@ export default function HomePage() {
     setToken(session.accessToken);
     setUser(session.user);
     setAuthDraft({ name: "", email: "", password: "" });
+    setVerificationPassword("");
     setVerificationCode("");
+    setResetCode("");
+    setResetPasswordDraft("");
     setModal(checkoutEvent ? "checkout" : null);
     showMessage(message);
   }
 
   async function resendEmailVerification() {
-    if (!authDraft.email || !authDraft.password) {
-      if (token) {
-        setBusy(true);
-        setError("");
-        try {
-          const result = await request<EmailVerificationChallenge | EmailVerificationStatus | AuthSession>(
-            "/auth/request-email-verification",
-            token,
-            { method: "POST" },
-          );
-          if ("verificationRequired" in result) {
-            setVerificationEmail(result.email);
-            setVerificationExpiresInSeconds(result.expiresInSeconds);
-            setVerificationCode("");
-            showMessage(result.sent
-              ? `A new verification code was sent to ${result.email}.`
-              : `A code was already sent to ${result.email}.`);
-          } else if ("accessToken" in result) {
-            establishSession(result, "Your email is verified. Welcome to Wiloplay.");
-          } else {
-            if (user) {
-              const verifiedUser = { ...user, emailVerifiedAt: result.emailVerifiedAt };
-              localStorage.setItem("sonora-user", JSON.stringify(verifiedUser));
-              setUser(verifiedUser);
-            }
-            setModal(null);
-            showMessage("Your email is verified.");
-          }
-        } catch (reason) {
-          setError(reason instanceof Error ? reason.message : "Could not resend the verification code.");
-        } finally {
-          setBusy(false);
-        }
-        return;
-      }
+    const email = verificationEmail || authDraft.email;
+    const password = verificationPassword || authDraft.password;
 
+    if (token && (!email || !password)) {
+      setBusy(true);
+      setError("");
+      try {
+        const result = await request<EmailVerificationChallenge | EmailVerificationStatus | AuthSession>(
+          "/auth/request-email-verification",
+          token,
+          { method: "POST" },
+        );
+        if ("verificationRequired" in result) {
+          openEmailVerification(result);
+        } else if ("accessToken" in result) {
+          establishSession(result, "Your email is verified. Welcome to Wiloplay.");
+        } else {
+          if (user) {
+            const verifiedUser = { ...user, emailVerifiedAt: result.emailVerifiedAt };
+            localStorage.setItem("sonora-user", JSON.stringify(verifiedUser));
+            setUser(verifiedUser);
+          }
+          setModal(null);
+          showMessage("Your email is verified.");
+        }
+      } catch (reason) {
+        setError(authErrorMessage(reason, "Could not resend the verification code."));
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+
+    if (!email || !password) {
       setAuthMode("login");
-      setAuthDraft((draft) => ({ name: "", email: verificationEmail, password: "" }));
+      setAuthDraft({ name: "", email: verificationEmail || email, password: "" });
       setModal("login");
-      setError("Sign in again to request a new verification code.");
+      setError("Enter your password once more so we can resend the verification code.");
       return;
     }
 
@@ -1087,24 +1572,20 @@ export default function HomePage() {
     setError("");
     try {
       const result = await request<AuthResponse>(
-        "/auth/login",
+        "/auth/resend-email-verification",
         null,
         {
           method: "POST",
-          body: JSON.stringify({ email: authDraft.email, password: authDraft.password }),
+          body: JSON.stringify({ email, password }),
         },
       );
       if ("verificationRequired" in result) {
-        setVerificationEmail(result.email);
-        setVerificationExpiresInSeconds(result.expiresInSeconds);
-        showMessage(result.sent
-          ? `A new verification code was sent to ${result.email}.`
-          : `A code was already sent to ${result.email}.`);
+        openEmailVerification(result, password);
       } else {
         establishSession(result, "Your email is verified. Welcome to Wiloplay.");
       }
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Could not resend the verification code.");
+      setError(authErrorMessage(reason, "Could not resend the verification code."));
     } finally {
       setBusy(false);
     }
@@ -1125,7 +1606,56 @@ export default function HomePage() {
       );
       establishSession(result, "Your email is verified. Welcome to Wiloplay.");
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Could not verify your email.");
+      setError(authErrorMessage(reason, "Could not verify your email."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitForgotPassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    const email = authDraft.email.trim().toLowerCase();
+    try {
+      const result = await request<PasswordResetChallenge>(
+        "/auth/forgot-password",
+        null,
+        { method: "POST", body: JSON.stringify({ email }) },
+      );
+      setVerificationEmail(result.email);
+      setResetExpiresInSeconds(result.expiresInSeconds ?? 600);
+      setResetCode("");
+      setResetPasswordDraft("");
+      setModal("reset-password");
+      showMessage(result.message);
+    } catch (reason) {
+      setError(authErrorMessage(reason, "Could not start password reset."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitResetPassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      const result = await request<AuthSession>(
+        "/auth/reset-password",
+        null,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            email: verificationEmail,
+            code: resetCode,
+            password: resetPasswordDraft,
+          }),
+        },
+      );
+      establishSession(result, "Password updated. You're signed in.");
+    } catch (reason) {
+      setError(authErrorMessage(reason, "Could not reset your password."));
     } finally {
       setBusy(false);
     }
@@ -1143,6 +1673,19 @@ export default function HomePage() {
     setArtistBankAccount(null);
     setArtistVerified(false);
     setArtistTracks([]);
+    setLikedTracks([]);
+    setLikedTrackKeys([]);
+    setPlaylists([]);
+    setPlaylistDetails(null);
+    setListeningHistory([]);
+    setRecommendations([]);
+    setCurrent(null);
+    setQueue([]);
+    setPlaying(false);
+    setQueueOpen(false);
+    setLibraryTab("recommendations");
+    historySavedPlaybackId.current = null;
+    countedListenTrackId.current = null;
     setNotificationOpen(false);
     showMessage("You've signed out.");
   }
@@ -1624,20 +2167,106 @@ export default function HomePage() {
     }
   }
 
-  function toggleTrack(track: Track) {
+  function toggleTrack(track: Track, nextQueue: Track[] = shownTracks) {
     if (!track.preview && !track.audioUrl) {
-      showMessage("Search Deezer for a song with an available preview to listen.");
+      showMessage("This track is not playable right now.");
       return;
     }
+    const playableQueue = nextQueue.filter((item) => item.preview || item.audioUrl);
+    setQueue(playableQueue.length ? playableQueue : [track]);
     if (current?.id === track.id && current.audioUrl === track.audioUrl) {
       setPlaying((isPlaying) => !isPlaying);
       return;
     }
     setCurrent(track);
     setPlaying(true);
+    setQueueOpen(false);
   }
 
-  const shownTracks = [...uploadedTracks, ...tracks];
+  function stepQueue(direction: -1 | 1, ended = false) {
+    const candidates = (queue.length ? queue : shownTracks)
+      .filter((track) => track.preview || track.audioUrl);
+    if (!candidates.length) {
+      setPlaying(false);
+      return;
+    }
+
+    if (direction < 0 && !ended && audioRef.current && audioRef.current.currentTime > 3) {
+      audioRef.current.currentTime = 0;
+      setElapsed(0);
+      return;
+    }
+
+    const currentIndex = candidates.findIndex((track) => track.id === current?.id);
+    let nextTrack: Track;
+    if (shuffle && candidates.length > 1) {
+      const alternatives = candidates.filter((track) => track.id !== current?.id);
+      nextTrack = alternatives[Math.floor(Math.random() * alternatives.length)];
+    } else {
+      const nextIndex = currentIndex + direction;
+      if (ended && repeatMode === "off" && (nextIndex < 0 || nextIndex >= candidates.length)) {
+        setPlaying(false);
+        return;
+      }
+      nextTrack = candidates[(nextIndex + candidates.length) % candidates.length];
+    }
+
+    if (nextTrack.id === current?.id) {
+      if (audioRef.current) audioRef.current.currentTime = 0;
+      setElapsed(0);
+      setPlaying(true);
+      return;
+    }
+    setCurrent(nextTrack);
+    setPlaying(true);
+  }
+
+  const wiloplaySearchTracks = useMemo(
+    () => (searchResults?.tracks ?? []).map((track) => apiTrackToPlayerTrack(track)),
+    [searchResults],
+  );
+  const shownTracks = useMemo(() => {
+    if (!query.trim() || !searchResults) return [...uploadedTracks, ...tracks];
+    if (searchFilter === "deezer") return tracks;
+    if (searchFilter === "wiloplay") return wiloplaySearchTracks;
+    if (searchFilter === "artists" || searchFilter === "shows") return [];
+    return [...wiloplaySearchTracks, ...tracks];
+  }, [query, searchResults, searchFilter, uploadedTracks, tracks, wiloplaySearchTracks]);
+  const activeLibraryTracks = libraryTab === "liked"
+    ? likedTracks
+    : libraryTab === "history"
+      ? listeningHistory
+      : libraryTab === "playlist"
+        ? (playlistDetails?.tracks ?? []).map(libraryEntryToPlayerTrack)
+        : recommendations;
+  const uploadedAlbums = useMemo(() => {
+    const albums = new Map<string, {
+      id: string;
+      title: string;
+      artist: string;
+      cover: string;
+      trackCount: number;
+      description: string | null;
+    }>();
+    for (const track of uploadedTracks) {
+      if (track.releaseType !== "ALBUM" || !track.albumTitle) continue;
+      const key = `${track.artistProfileId ?? track.artist}:${track.albumTitle}`;
+      const currentAlbum = albums.get(key);
+      if (currentAlbum) {
+        currentAlbum.trackCount += 1;
+      } else {
+        albums.set(key, {
+          id: String(track.id),
+          title: track.albumTitle,
+          artist: track.artist,
+          cover: track.cover,
+          trackCount: 1,
+          description: track.releaseDescription ?? null,
+        });
+      }
+    }
+    return [...albums.values()];
+  }, [uploadedTracks]);
   const upcomingEvents = events.filter((item) => new Date(item.startsAt).getTime() > now);
   const activeTicketOrders = myTicketOrders.filter(
     (order) => new Date(order.event.startsAt).getTime() > now,
@@ -1659,14 +2288,19 @@ export default function HomePage() {
         <nav className="side-nav" aria-label="Main navigation">
           <a className={`nav-link ${activeNav === "home" ? "active" : ""}`} aria-current={activeNav === "home" ? "location" : undefined} href="#home" onClick={() => setMobileNav(false)}><Home size={17} />Home</a>
           <button className={`nav-link ${activeNav === "discovery" ? "active" : ""}`} aria-current={activeNav === "discovery" ? "location" : undefined} onClick={() => { setActiveNav("discovery"); setSearchOpen(true); setMobileNav(false); document.getElementById("discovery")?.scrollIntoView({ behavior: "smooth" }); }}><Compass size={17} />Discover</button>
-          <a className={`nav-link ${activeNav === "for-you" ? "active" : ""}`} aria-current={activeNav === "for-you" ? "location" : undefined} href="#for-you" onClick={() => setMobileNav(false)}><Heart size={17} />Made for you</a>
+          <a className={`nav-link ${activeNav === "for-you" ? "active" : ""}`} aria-current={activeNav === "for-you" ? "location" : undefined} href="#library" onClick={() => setMobileNav(false)}><Heart size={17} />Made for you</a>
           <a className={`nav-link ${activeNav === "shows" ? "active" : ""}`} aria-current={activeNav === "shows" ? "location" : undefined} href="#shows" onClick={() => setMobileNav(false)}><Ticket size={17} />Live shows<span className="nav-new">NEW</span></a>
           <a className={`nav-link ${activeNav === "my-tickets" ? "active" : ""}`} aria-current={activeNav === "my-tickets" ? "location" : undefined} href="#my-tickets" onClick={() => setMobileNav(false)}><QrCode size={17} />My tickets</a>
         </nav>
         <div className="sidebar-rule" />
         <div className="nav-caption">YOUR SOUND</div>
-        <button className="library-link" onClick={() => { setAuthMode("login"); setModal("login"); }}><Plus size={16} />Create a playlist</button>
-        <div className="playlist-empty">Your music, your mood.<br />Come back here for the good stuff.</div>
+        <button className="library-link" onClick={() => openPlaylistDialog()}><Plus size={16} />Create a playlist</button>
+        <button className="library-link" onClick={() => openLibraryTab("liked")}><Heart size={15} />Liked songs</button>
+        <button className="library-link" onClick={() => openLibraryTab("history")}><Clock3 size={15} />Listening history</button>
+        <div className="sidebar-playlists" aria-label="Your playlists">
+          {playlists.slice(0, 5).map((playlist) => <button className="sidebar-playlist-link" key={playlist.id} onClick={() => void showPlaylist(playlist.id)}><ListMusic size={14} /><span>{playlist.name}</span></button>)}
+          {!playlists.length && <div className="playlist-empty">Your music, your mood.<br />Create a playlist and keep the good stuff close.</div>}
+        </div>
         <div className="sidebar-bottom">
           <div className="sidebar-note">
             <div className="note-icon"><Mic2 size={18} /></div>
@@ -1685,13 +2319,59 @@ export default function HomePage() {
             <button className="icon-btn mobile-menu" aria-label="Open menu" onClick={() => setMobileNav(!mobileNav)}><Menu size={19} /></button>
             <button className="icon-btn top-arrow" aria-label="Go back" onClick={() => window.history.back()}><ArrowLeft size={17} /></button>
             <button className="icon-btn top-arrow" aria-label="Go forward" onClick={() => window.history.forward()}><ArrowRight size={17} /></button>
-            <form className={`search-box ${searchOpen ? "search-focused" : ""}`} onSubmit={(event) => { event.preventDefault(); void searchTracks(query); }}>
-              <Search size={16} />
-              <input aria-label="Search tracks and artists" placeholder="Songs, artists, that one feeling..." value={query} onFocus={() => setSearchOpen(true)} onChange={(event) => onSearchChange(event.target.value)} />
-              {query && <button className="search-clear" type="button" aria-label="Clear search" onClick={() => { setQuery(""); void searchTracks(""); }}><X size={14} /></button>}
-            </form>
+            <div className="search-shell">
+              <form className={`search-box ${searchOpen ? "search-focused" : ""}`} role="search" onSubmit={(event) => { event.preventDefault(); void searchTracks(query); document.getElementById("track-list")?.scrollIntoView({ behavior: "smooth" }); }}>
+                <Search size={16} />
+                <input aria-label="Search songs, artists, albums, and shows" placeholder="Songs, artists, albums, shows..." value={query} onFocus={() => setSearchOpen(true)} onChange={(event) => onSearchChange(event.target.value)} onBlur={() => window.setTimeout(() => setSearchOpen(false), 180)} />
+                {searchLoading ? <span className="search-loading" aria-live="polite">Searching</span> : query ? <button className="search-clear" type="button" aria-label="Clear search" onClick={() => { setQuery(""); void searchTracks(""); }}><X size={14} /></button> : null}
+              </form>
+              {searchOpen && (query.trim() || searchResults) && <div className="search-panel" role="listbox" aria-label="Search results">
+                <div className="search-filter-row">
+                  {([
+                    ["all", "All", searchResults?.totals.all ?? 0],
+                    ["wiloplay", "Wiloplay", searchResults?.totals.tracks ?? 0],
+                    ["deezer", "Previews", searchResults?.totals.deezerTracks ?? 0],
+                    ["artists", "Artists", searchResults?.totals.artists ?? 0],
+                    ["shows", "Shows", searchResults?.totals.events ?? 0],
+                  ] as const).map(([id, label, count]) => (
+                    <button key={id} type="button" className={`search-filter${searchFilter === id ? " is-active" : ""}`} onMouseDown={(event) => event.preventDefault()} onClick={() => setSearchFilter(id)}>
+                      {label}{query.trim() ? ` · ${count}` : ""}
+                    </button>
+                  ))}
+                </div>
+                {searchLoading && <p className="search-panel-empty">Looking across Wiloplay and Deezer…</p>}
+                {!searchLoading && searchError && <p className="search-panel-empty">{searchError}</p>}
+                {!searchLoading && !searchError && query.trim() && !searchResults?.totals.all && <p className="search-panel-empty">No matches yet. Try another song, artist, mood, or city.</p>}
+                {!searchLoading && searchResults && (searchFilter === "all" || searchFilter === "wiloplay") && searchResults.tracks.slice(0, 5).map((track) => {
+                  const playable = apiTrackToPlayerTrack(track);
+                  return <button type="button" className="search-hit" key={`upload-${track.id}`} onMouseDown={(event) => event.preventDefault()} onClick={() => { toggleTrack(playable); setSearchOpen(false); }}>
+                    <Cover src={playable.cover} alt="" /><span><strong>{track.title}</strong><small>{track.artistName} · Wiloplay{track.genre ? ` · ${track.genre}` : ""}</small></span><Play size={13} />
+                  </button>;
+                })}
+                {!searchLoading && searchResults && (searchFilter === "all" || searchFilter === "deezer") && searchResults.deezerTracks.slice(0, 5).map((track) => (
+                  <button type="button" className="search-hit" key={`deezer-${track.id}`} onMouseDown={(event) => event.preventDefault()} onClick={() => { toggleTrack(track); setSearchOpen(false); }}>
+                    <Cover src={track.cover} alt="" /><span><strong>{track.title}</strong><small>{track.artist} · Preview</small></span><Play size={13} />
+                  </button>
+                ))}
+                {!searchLoading && searchResults && (searchFilter === "all" || searchFilter === "artists") && searchResults.artists.slice(0, 5).map((artist) => (
+                  <a className="search-hit" key={`artist-${artist.id}`} href={`/artist/${encodeURIComponent(artist.id)}`} onMouseDown={(event) => event.preventDefault()}>
+                    <Cover src={artist.coverUrl ? `${API}${artist.coverUrl}` : ""} alt="" /><span><strong>{artist.name}</strong><small>{artist.trackCount} release{artist.trackCount === 1 ? "" : "s"} · {artist.followers} follower{artist.followers === 1 ? "" : "s"}</small></span><Users size={13} />
+                  </a>
+                ))}
+                {!searchLoading && searchResults && (searchFilter === "all" || searchFilter === "shows") && searchResults.events.slice(0, 5).map((eventItem) => (
+                  <button type="button" className="search-hit" key={`event-${eventItem.id}`} onMouseDown={(event) => event.preventDefault()} onClick={() => { setSearchOpen(false); document.getElementById(`event-${eventItem.id}`)?.scrollIntoView({ behavior: "smooth" }); }}>
+                    <Cover src={eventItem.coverUrl ? `${API}${eventItem.coverUrl}` : ""} alt="" /><span><strong>{eventItem.title}</strong><small>{eventItem.artistName} · {eventItem.city} · {formatDate(eventItem.startsAt)}</small></span><Ticket size={13} />
+                  </button>
+                ))}
+                {query.trim() && <button type="button" className="search-panel-footer" onMouseDown={(event) => event.preventDefault()} onClick={() => { void searchTracks(query); document.getElementById("track-list")?.scrollIntoView({ behavior: "smooth" }); setSearchOpen(false); }}>See full results <ArrowRight size={14} /></button>}
+              </div>}
+            </div>
           </div>
           <div className="topbar-actions">
+            <button className="theme-toggle" type="button" aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`} aria-pressed={theme === "light"} title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`} onClick={toggleTheme}>
+              {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+              <span>{theme === "dark" ? "Light mode" : "Dark mode"}</span>
+            </button>
             {user ? (
               <div className="account-wrap">
                 {user.role === "ARTIST" && <details className="artist-studio-menu">
@@ -1756,11 +2436,15 @@ export default function HomePage() {
 
           <section className="section top-charts-section" id="top-charts">
             <div className="section-heading">
-              <div><span className="section-kicker">LISTENING RIGHT NOW</span><h2>WiloPlay charts.</h2><p>The tracks, artists, and albums making waves.</p></div>
-              <a className="text-link" href="https://www.deezer.com/channels/explore" target="_blank" rel="noreferrer">Explore on Deezer <ArrowRight size={15} /></a>
+              <div><span className="section-kicker">LISTENING RIGHT NOW</span><h2>WiloPlay charts.</h2><p>{chartError ? "Take a breath, then find your next favorite." : "The tracks, artists, and albums making waves."}</p></div>
+              {chart ? <a className="text-link" href="https://www.deezer.com/channels/explore" target="_blank" rel="noreferrer">Explore on Deezer <ArrowRight size={15} /></a> : chartError ? <button className="text-link" onClick={() => void loadChart()}><RefreshCw size={14} /> Try again</button> : null}
             </div>
-            {chartError && <div className="inline-error" role="status">{chartError}</div>}
-            {!chart && !chartError && <p className="chart-loading" role="status">Loading Deezer charts…</p>}
+            {chartError && <div className="music-service-state" role="status">
+              <div className="service-state-art" aria-hidden="true"><AudioLines size={34} /><Disc3 size={24} /></div>
+              <div className="service-state-copy"><span className="section-kicker">A MOMENT BETWEEN TRACKS</span><h3>The charts are catching their breath.</h3><p>The outside charts didn&apos;t come through this time. Wiloplay artist releases are still here whenever you&apos;re ready.</p></div>
+              <div className="service-state-actions"><button onClick={() => void loadChart()}><RefreshCw size={14} /> Try charts again</button><button className="service-state-secondary" onClick={() => document.getElementById("track-list")?.scrollIntoView({ behavior: "smooth" })}>Explore Wiloplay music <ArrowRight size={14} /></button></div>
+            </div>}
+            {!chart && !chartError && chartLoading && <div className="chart-loading-card" role="status"><AudioLines size={18} /><span>Finding the day&apos;s soundtrack…</span></div>}
             {chart && <>
               <section className="chart-group" aria-labelledby="top-tracks-heading">
                 <div className="chart-group-heading"><h3 id="top-tracks-heading">Top tracks</h3><span className="source-note"><Disc3 size={14} /> Play previews</span></div>
@@ -1812,15 +2496,92 @@ export default function HomePage() {
             </>}
           </section>
 
+          {uploadedAlbums.length > 0 && <section className="section uploaded-albums-section" id="albums">
+            <div className="section-heading">
+              <div><span className="section-kicker">FULL RELEASES, FROM THE SOURCE</span><h2>Albums on Wiloplay.</h2><p>Full-length releases shared by Wiloplay artists.</p></div>
+            </div>
+            <div className="uploaded-album-grid">
+              {uploadedAlbums.slice(0, 8).map((album) => <a className="uploaded-album-card" href={`/album/${encodeURIComponent(album.id)}`} key={album.id}>
+                <Cover src={album.cover} alt={`${album.title} cover`} />
+                <strong>{album.title}</strong><span>{album.artist}</span><small>{album.trackCount} {album.trackCount === 1 ? "track" : "tracks"}</small>
+              </a>)}
+            </div>
+          </section>}
+
+          <section className="section listener-library" id="library">
+            <div className="section-heading">
+              <div><span className="section-kicker">YOUR MUSIC, YOUR WAY</span><h2>{libraryTab === "playlist" ? playlistDetails?.name ?? "Your playlist" : "Your listening room."}</h2><p>{libraryTab === "playlist" ? playlistDetails?.description || "A collection made by you." : "Liked songs, listening history, and new finds picked from Wiloplay releases."}</p></div>
+              {libraryTab === "playlist" && playlistDetails ? <button className="text-link library-delete-button" disabled={libraryBusy} onClick={() => void deleteCurrentPlaylist()}><Trash2 size={14} /> Delete playlist</button> : <button className="text-link" onClick={() => openPlaylistDialog()}><Plus size={15} /> New playlist</button>}
+            </div>
+            <div className="library-tabs" role="tablist" aria-label="Your music library">
+              <button className={libraryTab === "recommendations" ? "is-active" : ""} role="tab" aria-selected={libraryTab === "recommendations"} onClick={() => openLibraryTab("recommendations")}><AudioLines size={14} />For you</button>
+              <button className={libraryTab === "liked" ? "is-active" : ""} role="tab" aria-selected={libraryTab === "liked"} onClick={() => openLibraryTab("liked")}><Heart size={14} />Liked songs <span>{likedTracks.length}</span></button>
+              <button className={libraryTab === "history" ? "is-active" : ""} role="tab" aria-selected={libraryTab === "history"} onClick={() => openLibraryTab("history")}><Clock3 size={14} />History</button>
+              {playlists.map((playlist) => <button className={libraryTab === "playlist" && playlistDetails?.id === playlist.id ? "is-active" : ""} role="tab" aria-selected={libraryTab === "playlist" && playlistDetails?.id === playlist.id} key={playlist.id} onClick={() => void showPlaylist(playlist.id)}><ListMusic size={14} />{playlist.name}</button>)}
+            </div>
+            {libraryError && <div className="inline-error" role="alert">{libraryError}</div>}
+            {!user ? <div className="library-empty-state"><div className="library-empty-art"><Heart size={25} /><AudioLines size={16} /></div><div><h3>Your next favorite belongs here.</h3><p>Sign in to save songs, make playlists, and pick up where you left off.</p></div><button onClick={() => { setAuthMode("login"); setModal("login"); }}>Sign in <ArrowRight size={14} /></button></div>
+              : libraryLoading ? <div className="chart-loading-card"><AudioLines size={18} /><span>Getting your listening room ready…</span></div>
+                : activeLibraryTracks.length ? <div className="library-track-list">
+                  {activeLibraryTracks.map((track, index) => {
+                    const isLiked = likedTrackKeys.includes(libraryTrackKey(track));
+                    const isCurrent = current?.id === track.id;
+                    return <article className={`library-track-row${isCurrent ? " track-current" : ""}`} key={`${libraryTrackKey(track)}-${index}`}>
+                      <button className="library-track-play" aria-label={`${isCurrent && playing ? "Pause" : "Play"} ${track.title}`} onClick={() => toggleTrack(track, activeLibraryTracks)}><Cover src={track.cover} alt={`${track.title} cover`} /><span>{isCurrent && playing ? <Pause size={13} /> : <Play size={13} />}</span></button>
+                      <div className="library-track-info"><strong>{track.title}</strong><small>{track.artist}{track.album || track.albumTitle ? ` · ${track.album ?? track.albumTitle}` : ""}</small></div>
+                      <span className="library-track-duration">{formatTime(track.duration)}</span>
+                      <button className={`library-icon-button${isLiked ? " is-active" : ""}`} aria-label={isLiked ? `Remove ${track.title} from liked songs` : `Like ${track.title}`} aria-pressed={isLiked} onClick={() => void toggleLikeTrack(track)}><Heart size={15} fill={isLiked ? "currentColor" : "none"} /></button>
+                      {libraryTab === "playlist" ? <button className="library-icon-button" aria-label={`Remove ${track.title} from playlist`} disabled={libraryBusy} onClick={() => void removePlaylistTrack(track)}><Trash2 size={14} /></button> : <button className="library-icon-button" aria-label={`Add ${track.title} to playlist`} onClick={() => openPlaylistDialog(track)}><Plus size={15} /></button>}
+                    </article>;
+                  })}
+                </div>
+                : <div className="library-empty-state"><div className="library-empty-art"><Music2 size={25} /><Disc3 size={17} /></div><div><h3>{libraryTab === "liked" ? "Save the songs that stay with you." : libraryTab === "history" ? "Your listening story starts here." : libraryTab === "playlist" ? "This playlist is ready for its first track." : "A little more listening makes this yours."}</h3><p>{libraryTab === "liked" ? "Tap the heart beside a track to keep it close." : libraryTab === "history" ? "Start any full track or Deezer preview to build your history." : libraryTab === "playlist" ? "Add music from search, recommendations, or artist releases." : "Explore releases from Wiloplay artists and we’ll find more in the same lane."}</p></div><button onClick={() => document.getElementById("track-list")?.scrollIntoView({ behavior: "smooth" })}>Explore music <ArrowRight size={14} /></button></div>}
+          </section>
+
           <section className="section tracks-section" id="track-list">
             <div className="section-heading compact-heading">
-              <div><span className="section-kicker">{query ? "A FEW GOOD MATCHES" : "THE FIRST SONG IS THE HARDEST"}</span><h2>{query ? "For the curious." : "Good things, on repeat."}</h2></div>
-              <span className="source-note"><Disc3 size={14} /> Deezer previews · random next</span>
+              <div><span className="section-kicker">{query ? "SEARCH RESULTS" : "THE FIRST SONG IS THE HARDEST"}</span><h2>{query ? `Results for “${query}”` : "Good things, on repeat."}</h2><p>{query ? `${shownTracks.length} playable track${shownTracks.length === 1 ? "" : "s"}${searchResults ? ` · ${searchResults.totals.artists} artist${searchResults.totals.artists === 1 ? "" : "s"} · ${searchResults.totals.events} show${searchResults.totals.events === 1 ? "" : "s"}` : ""}` : "Wiloplay releases and Deezer previews in one place."}</p></div>
+              <span className="source-note"><Disc3 size={14} /> {searchFilter === "wiloplay" ? "Wiloplay only" : searchFilter === "deezer" ? "Deezer previews" : "Wiloplay + previews"}</span>
             </div>
+            {query.trim() && <div className="search-filter-row search-filter-row-inline">
+              {([
+                ["all", "All"],
+                ["wiloplay", "Wiloplay"],
+                ["deezer", "Previews"],
+                ["artists", "Artists"],
+                ["shows", "Shows"],
+              ] as const).map(([id, label]) => (
+                <button key={id} type="button" className={`search-filter${searchFilter === id ? " is-active" : ""}`} onClick={() => {
+                  setSearchFilter(id);
+                  if (id === "artists") document.getElementById("discovery")?.scrollIntoView({ behavior: "smooth" });
+                  if (id === "shows") document.getElementById("shows")?.scrollIntoView({ behavior: "smooth" });
+                }}>{label}</button>
+              ))}
+            </div>}
+            {searchFilter === "artists" && searchResults?.artists.length ? <div className="search-entity-grid">{searchResults.artists.map((artist) => (
+              <a className="search-entity-card" href={`/artist/${encodeURIComponent(artist.id)}`} key={artist.id}>
+                <Cover src={artist.coverUrl ? `${API}${artist.coverUrl}` : ""} alt="" className="search-entity-cover" />
+                <strong>{artist.name}</strong>
+                <span>{artist.trackCount} release{artist.trackCount === 1 ? "" : "s"} · {artist.followers} followers</span>
+              </a>
+            ))}</div> : null}
+            {searchFilter === "shows" && searchResults?.events.length ? <div className="search-entity-grid">{searchResults.events.map((eventItem) => (
+              <button type="button" className="search-entity-card" key={eventItem.id} onClick={() => document.getElementById(`event-${eventItem.id}`)?.scrollIntoView({ behavior: "smooth" })}>
+                <Cover src={eventItem.coverUrl ? `${API}${eventItem.coverUrl}` : ""} alt="" className="search-entity-cover" />
+                <strong>{eventItem.title}</strong>
+                <span>{eventItem.city} · {formatDate(eventItem.startsAt)}</span>
+              </button>
+            ))}</div> : null}
             {error && <div className="inline-error" role="status">{error}</div>}
+            {searchError && <div className="music-service-state search-service-state" role="status">
+              <div className="service-state-art" aria-hidden="true"><Search size={28} /><Music2 size={20} /></div>
+              <div className="service-state-copy"><span className="section-kicker">THE SOUND IS STILL HERE</span><h3>Search is taking a little breather.</h3><p>{searchError} You can still play full tracks uploaded by Wiloplay artists.</p></div>
+              <div className="service-state-actions"><button onClick={() => void searchTracks(query)}><RefreshCw size={14} /> Try search again</button><button className="service-state-secondary" onClick={() => { setQuery(""); void searchTracks(""); }}>Show all music <ArrowRight size={14} /></button></div>
+            </div>}
             <div className="track-list">
               {shownTracks.length ? shownTracks.slice(0, 8).map((track, index) => {
                 const isCurrent = current?.id === track.id;
+                const isLiked = likedTrackKeys.includes(libraryTrackKey(track));
                 return <div className={`track-row ${isCurrent ? "track-current" : ""}`} key={track.id}>
                   <span className="track-index">{isCurrent && playing ? <AudioLines size={15} /> : String(index + 1).padStart(2, "0")}</span>
                   <button className="track-art-button" aria-label={`${isCurrent && playing ? "Pause" : "Play"} ${track.title}`} onClick={() => toggleTrack(track)}><Cover src={track.cover} alt={`${track.title} cover`} /><span className="track-overlay">{isCurrent && playing ? <Pause size={15} fill="currentColor" /> : <Play size={15} fill="currentColor" />}</span></button>
@@ -1829,10 +2590,13 @@ export default function HomePage() {
                     {track.artistProfileId && <a className="track-profile-link" href={`/artist/${encodeURIComponent(track.artistProfileId)}`} aria-label={`View ${track.artist} artist profile`} title={`View ${track.artist} artist profile`}><Users size={13} /><span>Profile</span></a>}
                   </div>
                   <span className="track-album">{track.album ?? "Your next favorite"}</span>
-                  <button className={`track-heart ${isCurrent ? "hearted" : ""}`} aria-label={`Add ${track.title} to favorites`} onClick={() => showMessage("Saved to your favorites. Good choice.")}><Heart size={16} /></button>
+                  <div className="track-actions">
+                    <button className={`track-heart${isLiked ? " hearted" : ""}`} aria-label={isLiked ? `Remove ${track.title} from liked songs` : `Like ${track.title}`} aria-pressed={isLiked} disabled={typeof track.id === "number" && !track.preview} onClick={() => void toggleLikeTrack(track)}><Heart size={16} fill={isLiked ? "currentColor" : "none"} /></button>
+                    <button className="track-heart track-add-button" aria-label={`Add ${track.title} to a playlist`} onClick={() => openPlaylistDialog(track)}><Plus size={15} /></button>
+                  </div>
                   <span className="track-duration">{formatTime(track.duration)}</span>
                 </div>;
-              }) : <div className="empty-search"><Search size={18} />Nothing found just yet. Try another search?</div>}
+              }) : searchError ? null : <div className="empty-search"><Search size={18} />Nothing found just yet. Try another search?</div>}
             </div>
             <button className="browse-more" onClick={() => { setSearchOpen(true); document.querySelector<HTMLInputElement>(".search-box input")?.focus(); }}>Keep exploring <ArrowRight size={15} /></button>
           </section>
@@ -1969,54 +2733,111 @@ export default function HomePage() {
             ))}</div> : <div className="ticket-empty"><p>Your uploaded singles and albums will appear here.</p><button className="ticket-button" onClick={openUploadWizard}>Upload your first release</button></div>}
           </section>}
 
-          <footer className="footer"><a href="#" className="brand footer-brand"><span className="brand-mark"><AudioLines size={18} /></span><span>wiloplay<span className="brand-dot">.</span></span></a><span>Made for music people. Wherever you find them.</span><div><a href="#discovery">Discover</a><a href="#shows">Live shows</a><button onClick={() => showMessage("More good things are on the way.")}>About us</button></div></footer>
+          <footer className="footer"><a href="#" className="brand footer-brand"><span className="brand-mark"><AudioLines size={18} /></span><span>wiloplay<span className="brand-dot">.</span></span></a><span>Made for music people. Wherever you find them.</span><div><a href="#discovery">Discover</a><a href="#shows">Live shows</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a><button onClick={() => showMessage("More good things are on the way.")}>About us</button></div></footer>
         </div>
       </section>
 
       <div className="player" aria-label="Music player">
-        <audio ref={audioRef} onTimeUpdate={(event) => { setElapsed(event.currentTarget.currentTime); recordQualifiedListen(event.currentTarget); }} onDurationChange={(event) => { if (Number.isFinite(event.currentTarget.duration)) setMediaDuration(event.currentTarget.duration); }} onEnded={() => {
-          const candidates = shownTracks.filter((track) =>
-            (track.preview || track.audioUrl) && track.id !== current?.id,
-          );
-          if (!candidates.length) {
-            listenPlaybackId.current = crypto.randomUUID();
-            countedListenTrackId.current = null;
-            setPlaying(false);
+        <audio ref={audioRef} onPlay={recordPlaybackHistory} onTimeUpdate={(event) => { setElapsed(event.currentTarget.currentTime); recordQualifiedListen(event.currentTarget); }} onDurationChange={(event) => { if (Number.isFinite(event.currentTarget.duration)) setMediaDuration(event.currentTarget.duration); }} onEnded={() => {
+          if (repeatMode === "one" && audioRef.current) {
+            audioRef.current.currentTime = 0;
+            setElapsed(0);
+            setPlaying(true);
             return;
           }
-          setCurrent(candidates[Math.floor(Math.random() * candidates.length)]);
-        }} onError={() => { if (current && playing) { setPlaying(false); showMessage("This preview isn't available right now."); } }} />
+          stepQueue(1, true);
+        }} onError={() => { if (current && playing) { setPlaying(false); showMessage("This audio couldn't start. Try another track."); } }} />
         <div className="player-track">
-          {current ? <><Cover src={current.cover} alt="" className="player-cover" /><div className="player-track-info"><strong>{current.title}</strong><span>{current.artist}</span></div><button className="player-heart" aria-label="Like track" onClick={() => showMessage("Saved to your favorites.")}><Heart size={15} /></button></> : <><div className="player-placeholder"><Headphones size={17} /></div><div className="player-track-info"><strong>Your next favorite is out there.</strong><span>Press play and see where you end up.</span></div></>}
+          {current ? <><Cover src={current.cover} alt="" className="player-cover" /><div className="player-track-info"><strong>{current.title}</strong><span>{current.artist}</span></div><button className={`player-heart${likedTrackKeys.includes(libraryTrackKey(current)) ? " hearted" : ""}`} aria-label={likedTrackKeys.includes(libraryTrackKey(current)) ? "Remove from liked songs" : "Add to liked songs"} aria-pressed={likedTrackKeys.includes(libraryTrackKey(current))} onClick={() => void toggleLikeTrack(current)}><Heart size={15} fill={likedTrackKeys.includes(libraryTrackKey(current)) ? "currentColor" : "none"} /></button></> : <><div className="player-placeholder"><Headphones size={17} /></div><div className="player-track-info"><strong>Your next favorite is out there.</strong><span>Press play and see where you end up.</span></div></>}
         </div>
-        <div className="player-center"><div className="player-controls"><button className="player-minor" aria-label="Previous track" onClick={() => { if (shownTracks.length) toggleTrack(shownTracks[0]); }}><ArrowLeft size={14} /></button><button className="player-play" aria-label={playing ? "Pause" : "Play"} onClick={() => current ? setPlaying(!playing) : shownTracks[0] && toggleTrack(shownTracks[0])}>{playing ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" />}</button><button className="player-minor" aria-label="Next track" onClick={() => { const index = shownTracks.findIndex((track) => track.id === current?.id); if (shownTracks.length) toggleTrack(shownTracks[(index + 1 + shownTracks.length) % shownTracks.length]); }}><ArrowRight size={14} /></button></div>        <div className="progress-row"><span>{formatTime(elapsed)}</span><div className="progress-track"><div className="progress-fill" style={{ width: `${mediaDuration ? Math.min((elapsed / mediaDuration) * 100, 100) : 0}%` }} /></div><span>{formatTime(mediaDuration || current?.duration)}</span></div></div>
-        <div className="player-right"><details className="location-sharing-control"><summary><MapPin size={14} /><span>{listenCity ? `City: ${listenCity}` : "Share city"}</span></summary><form onSubmit={saveListenerCity}><label htmlFor="listener-city">Optional city for trend analytics</label><input id="listener-city" value={cityDraft} maxLength={80} onChange={(event) => setCityDraft(event.target.value)} placeholder="e.g. Lagos" /><small>Only your city is shared, and artist profiles show aggregated totals. No GPS is used.</small><button>{listenCity ? "Update city" : "Share city"}</button>{listenCity && <button type="button" className="city-sharing-stop" onClick={() => void stopCitySharing()}>Stop sharing</button>}</form></details><Volume2 size={16} /><div className="volume-track"><div /></div><button className="queue-btn" aria-label="Open queue" onClick={() => showMessage("You're already listening to all the good stuff.")}><Menu size={18} /></button></div>
+        <div className="player-center">
+          <div className="player-controls">
+            <button className={`player-minor player-toggle${shuffle ? " is-active" : ""}`} aria-label={`Shuffle ${shuffle ? "on" : "off"}`} aria-pressed={shuffle} onClick={() => setShuffle((value) => !value)}><Shuffle size={14} /></button>
+            <button className="player-minor" aria-label="Previous track" onClick={() => stepQueue(-1)}><ArrowLeft size={14} /></button>
+            <button className="player-play" aria-label={playing ? "Pause" : "Play"} onClick={() => current ? setPlaying(!playing) : shownTracks[0] && toggleTrack(shownTracks[0])}>{playing ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" />}</button>
+            <button className="player-minor" aria-label="Next track" onClick={() => stepQueue(1)}><ArrowRight size={14} /></button>
+            <button className={`player-minor player-toggle${repeatMode !== "off" ? " is-active" : ""}`} aria-label={`Repeat ${repeatMode}`} aria-pressed={repeatMode !== "off"} onClick={() => setRepeatMode((value) => value === "off" ? "all" : value === "all" ? "one" : "off")}><Repeat size={14} /><span className="repeat-mode-indicator">{repeatMode === "one" ? "1" : ""}</span></button>
+          </div>
+          <div className="progress-row"><span>{formatTime(elapsed)}</span><input className="progress-slider" aria-label="Seek through track" type="range" min="0" max={mediaDuration || 0} step="1" value={Math.min(elapsed, mediaDuration || 0)} disabled={!mediaDuration} onChange={(event) => { const time = Number(event.target.value); if (audioRef.current) audioRef.current.currentTime = time; setElapsed(time); }} /><span>{formatTime(mediaDuration || current?.duration)}</span></div>
+        </div>
+        <div className="player-right"><details className="location-sharing-control"><summary><MapPin size={14} /><span>{listenCity ? `City: ${listenCity}` : "Share city"}</span></summary><form onSubmit={saveListenerCity}><label htmlFor="listener-city">Optional city for trend analytics</label><input id="listener-city" value={cityDraft} maxLength={80} onChange={(event) => setCityDraft(event.target.value)} placeholder="e.g. Lagos" /><small>Only your city is shared, and artist profiles show aggregated totals. No GPS is used.</small><button>{listenCity ? "Update city" : "Share city"}</button>{listenCity && <button type="button" className="city-sharing-stop" onClick={() => void stopCitySharing()}>Stop sharing</button>}</form></details><Volume2 size={16} /><input className="volume-slider" aria-label="Volume" type="range" min="0" max="1" step="0.05" value={volume} onChange={(event) => { const level = Number(event.target.value); setVolume(level); if (audioRef.current) audioRef.current.volume = level; }} /><button className="queue-btn" aria-label="Toggle play queue" aria-expanded={queueOpen} onClick={() => setQueueOpen((open) => !open)}><Menu size={18} /></button></div>
       </div>
 
+      {queueOpen && <aside className="queue-panel" aria-label="Play queue">
+        <div className="queue-panel-heading"><div><span className="section-kicker">UP NEXT</span><strong>Your queue</strong></div><button aria-label="Close queue" onClick={() => setQueueOpen(false)}><X size={15} /></button></div>
+        {(queue.length ? queue : shownTracks.filter((track) => track.preview || track.audioUrl)).slice(0, 12).map((track, index) => <button className={`queue-track${current?.id === track.id ? " is-current" : ""}`} key={`${track.id}-${index}`} onClick={() => toggleTrack(track, queue.length ? queue : shownTracks)}><Cover src={track.cover} alt="" /><span><strong>{track.title}</strong><small>{track.artist}</small></span><Play size={13} /></button>)}
+        {!queue.length && !shownTracks.some((track) => track.preview || track.audioUrl) && <p className="queue-empty">Start a track to build your queue.</p>}
+      </aside>}
+
       {notice && <div className="toast" role="status"><span><Check size={15} /></span>{notice}<button onClick={() => setNotice("")} aria-label="Dismiss"><X size={14} /></button></div>}
+
+      {playlistDialog && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !libraryBusy) { setPlaylistDialog(null); setLibraryError(""); } }}>
+        <section className="modal-card playlist-dialog" role="dialog" aria-modal="true" aria-labelledby="playlist-dialog-heading">
+          <button className="modal-close" aria-label="Close playlist dialog" disabled={libraryBusy} onClick={() => { setPlaylistDialog(null); setLibraryError(""); }}><X size={18} /></button>
+          <div className="modal-logo"><ListMusic size={21} /></div>
+          <span className="section-kicker">MAKE IT YOURS</span>
+          <h2 id="playlist-dialog-heading">{playlistDialog.mode === "create" ? "A new playlist." : "Save it for later."}</h2>
+          <p className="modal-subtitle">{playlistDialog.track ? `Add “${playlistDialog.track.title}” to a playlist.` : "Give your favorite sounds a place of their own."}</p>
+          <form className="modal-form" onSubmit={(event) => void submitPlaylistDialog(event)}>
+            {playlistDialog.mode === "create" ? <>
+              <label>Playlist name<input value={playlistNameDraft} onChange={(event) => setPlaylistNameDraft(event.target.value)} placeholder="Late-night favorites" maxLength={60} required /></label>
+              <label>Description <span className="wizard-optional">OPTIONAL</span><textarea value={playlistDescriptionDraft} onChange={(event) => setPlaylistDescriptionDraft(event.target.value)} placeholder="A little note about this mix" maxLength={240} rows={3} /></label>
+            </> : <label>Choose a playlist<select value={playlistChoiceId} onChange={(event) => setPlaylistChoiceId(event.target.value)} required>{playlists.map((playlist) => <option value={playlist.id} key={playlist.id}>{playlist.name}</option>)}</select></label>}
+            {libraryError && <div className="form-error" role="alert">{libraryError}</div>}
+            <button className="form-submit" disabled={libraryBusy || (playlistDialog.mode === "add" && !playlistChoiceId)}>{libraryBusy ? "Saving…" : playlistDialog.mode === "create" ? "Create playlist" : "Add to playlist"} <ArrowRight size={15} /></button>
+          </form>
+        </section>
+      </div>}
 
       {modal && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeModal(); }}>
         <section key={modal} className={`modal-card${modal === "upload" || modal === "event" ? " wizard-modal" : ""}`} role="dialog" aria-modal="true" aria-labelledby="modal-heading">
           <button className="modal-close" aria-label="Close dialog" onClick={closeModal}><X size={18} /></button>
           <div className="modal-logo"><AudioLines size={21} /></div>
           {modal === "login" || modal === "signup" ? <>
-            <span className="section-kicker">YOUR PEOPLE ARE HERE</span><h2 id="modal-heading">{authMode === "signup" ? "Find your people." : "Good to have you back."}</h2><p className="modal-subtitle">{authMode === "signup" ? "One account. Every song that feels like you." : "Pick up right where the music left off."}</p>
+            <span className="section-kicker">YOUR PEOPLE ARE HERE</span><h2 id="modal-heading">{authMode === "signup" ? "Find your people." : "Good to have you back."}</h2><p className="modal-subtitle">{authMode === "signup" ? "One account. Every song that feels like you." : "Pick up right where the music left off. Unverified accounts continue to email verification."}</p>
             <form key={`auth-${authMode}`} className="modal-form" onSubmit={(event) => void handleAuth(event)}>
               {authMode === "signup" && <label>Your name<input name="name" autoComplete="name" placeholder="How should we call you?" value={authDraft.name} onChange={(event) => setAuthDraft((draft) => ({ ...draft, name: event.target.value }))} required minLength={2} maxLength={60} /></label>}
               <label>Email address<input name="email" type="email" autoComplete="email" placeholder="you@somewhere.com" value={authDraft.email} onChange={(event) => setAuthDraft((draft) => ({ ...draft, email: event.target.value }))} required /></label>
-              <label>Password<input name="password" type="password" autoComplete={authMode === "signup" ? "new-password" : "current-password"} placeholder="At least 8 characters" value={authDraft.password} onChange={(event) => setAuthDraft((draft) => ({ ...draft, password: event.target.value }))} minLength={8} required /></label>
+              <label>Password<input name="password" type="password" autoComplete={authMode === "signup" ? "new-password" : "current-password"} placeholder={authMode === "signup" ? "8+ chars, letter and number" : "Your password"} value={authDraft.password} onChange={(event) => setAuthDraft((draft) => ({ ...draft, password: event.target.value }))} minLength={8} required /></label>
+              {authMode === "signup" && <>
+                <label className="auth-consent"><input type="checkbox" name="termsAccepted" required /><span>By creating an account, you agree to the <a href="/terms" target="_blank" rel="noreferrer">Terms and Conditions</a> and acknowledge the <a href="/privacy" target="_blank" rel="noreferrer">Privacy Policy</a>.</span></label>
+                <p className="auth-legal-copy">We&apos;ll email a verification code before your account is fully active.</p>
+              </>}
               {error && <div className="form-error" role="alert">{error}</div>}<button className="form-submit" disabled={busy}>{busy ? "One second..." : authMode === "signup" ? "Create your account" : "Log in"} <ArrowRight size={15} /></button>
             </form>
+            {authMode === "login" && <div className="auth-link-row"><button type="button" onClick={() => { setError(""); setModal("forgot-password"); }}>Forgot password?</button><button type="button" onClick={() => { setError(""); setModal("forgot-password"); }}>Resend password reset</button></div>}
             <p className="modal-switch">{authMode === "signup" ? "Already found us?" : "New around here?"} <button onClick={() => { setAuthMode(authMode === "signup" ? "login" : "signup"); setAuthDraft((draft) => ({ ...draft, password: "" })); setError(""); }}>{authMode === "signup" ? "Log in" : "Make an account"}</button></p>
+            <p className="auth-legal-links"><a href="/terms" target="_blank" rel="noreferrer">Terms and Conditions</a><span>·</span><a href="/privacy" target="_blank" rel="noreferrer">Privacy Policy</a></p>
+          </> : modal === "forgot-password" ? <>
+            <span className="section-kicker">ACCOUNT RECOVERY</span><h2 id="modal-heading">Reset your password.</h2>
+            <p className="modal-subtitle">Enter the email on your account. We&apos;ll send a six-digit code if it matches. You can also use this to resend a password reset code.</p>
+            <form className="modal-form" onSubmit={(event) => void submitForgotPassword(event)}>
+              <label>Email address<input name="email" type="email" autoComplete="email" placeholder="you@somewhere.com" value={authDraft.email} onChange={(event) => setAuthDraft((draft) => ({ ...draft, email: event.target.value }))} required /></label>
+              {error && <div className="form-error" role="alert">{error}</div>}
+              <button className="form-submit" disabled={busy || !authDraft.email.trim()}>{busy ? "Sending..." : "Send reset code"} <ArrowRight size={15} /></button>
+            </form>
+            <div className="auth-link-row"><button type="button" onClick={() => { setAuthMode("login"); setModal("login"); setError(""); }}>Back to log in</button><button type="button" onClick={() => { setAuthMode("signup"); setModal("signup"); setError(""); }}>Create an account</button></div>
+            <p className="auth-legal-links"><a href="/terms" target="_blank" rel="noreferrer">Terms and Conditions</a><span>·</span><a href="/privacy" target="_blank" rel="noreferrer">Privacy Policy</a></p>
+          </> : modal === "reset-password" ? <>
+            <span className="section-kicker">CHOOSE A NEW PASSWORD</span><h2 id="modal-heading">Almost there.</h2>
+            <p className="modal-subtitle">Enter the code sent to <strong>{verificationEmail}</strong> and pick a new password. Codes expire in {Math.max(1, Math.ceil(resetExpiresInSeconds / 60))} minutes.</p>
+            <form className="modal-form" onSubmit={(event) => void submitResetPassword(event)}>
+              <label>Reset code<input className="email-verification-code" name="code" type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} placeholder="000000" value={resetCode} onChange={(event) => setResetCode(event.target.value.replace(/\D/g, "").slice(0, 6))} required /></label>
+              <label>New password<input name="password" type="password" autoComplete="new-password" placeholder="8+ chars, letter and number" value={resetPasswordDraft} onChange={(event) => setResetPasswordDraft(event.target.value)} minLength={8} required /></label>
+              {error && <div className="form-error" role="alert">{error}</div>}
+              <button className="form-submit" disabled={busy || resetCode.length !== 6 || resetPasswordDraft.length < 8}>{busy ? "Saving..." : "Update password"} <ArrowRight size={15} /></button>
+            </form>
+            <div className="auth-link-row"><button type="button" disabled={busy} onClick={() => { setModal("forgot-password"); setError(""); }}>Resend password reset code</button><button type="button" onClick={() => { setAuthMode("login"); setModal("login"); setError(""); }}>Back to log in</button></div>
           </> : modal === "email-verification" ? <>
             <span className="section-kicker">CHECK YOUR INBOX</span><h2 id="modal-heading">Verify your email.</h2>
-            <p className="modal-subtitle">We sent a six-digit code to <strong>{verificationEmail}</strong>. It expires in {Math.max(1, Math.ceil(verificationExpiresInSeconds / 60))} minutes.</p>
+            <p className="modal-subtitle">We sent a six-digit code to <strong>{verificationEmail}</strong>. It expires in {Math.max(1, Math.ceil(verificationExpiresInSeconds / 60))} minutes. Logging in again continues here until you verify.</p>
             <form className="modal-form" onSubmit={(event) => void verifyEmail(event)}>
               <label>Verification code<input className="email-verification-code" name="code" type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} placeholder="000000" value={verificationCode} onChange={(event) => setVerificationCode(event.target.value.replace(/\D/g, "").slice(0, 6))} required /></label>
               {error && <div className="form-error" role="alert">{error}</div>}
               <button className="form-submit" disabled={busy || verificationCode.length !== 6}>{busy ? "Verifying..." : "Verify email"} <ArrowRight size={15} /></button>
             </form>
-            <p className="modal-switch">Didn&apos;t get a code? <button type="button" disabled={busy} onClick={() => void resendEmailVerification()}>Resend code</button></p>
+            <div className="auth-link-row"><button type="button" disabled={busy} onClick={() => void resendEmailVerification()}>Resend verification code</button><button type="button" onClick={() => { setAuthMode("login"); setModal("login"); setError(""); }}>Back to log in</button></div>
+            <p className="auth-legal-links"><a href="/terms" target="_blank" rel="noreferrer">Terms and Conditions</a><span>·</span><a href="/privacy" target="_blank" rel="noreferrer">Privacy Policy</a></p>
           </> : modal === "upload" ? <>
             <span className="section-kicker">GET YOUR MUSIC OUT THERE</span><h2 id="modal-heading">Share a new release.</h2><p className="modal-subtitle">Upload a single or group tracks into an album with one shared cover.</p>
             <form className="modal-form wizard-form" ref={uploadFormRef} onSubmit={(event) => void uploadTrack(event)}>

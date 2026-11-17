@@ -4,7 +4,7 @@ import { basename, join, parse } from "node:path";
 import { PrismaService } from "../prisma/prisma.service";
 import { UpdateTrackDto, UploadTrackDto } from "./tracks.dto";
 
-const trackSelect = {
+export const trackSelect = {
   id: true,
   artistId: true,
   title: true,
@@ -40,6 +40,25 @@ export class TracksService {
     });
   }
 
+  search(query: string) {
+    const term = query.trim().slice(0, 100);
+    if (!term) return [];
+    return this.prisma.track.findMany({
+      where: {
+        OR: [
+          { title: { contains: term, mode: "insensitive" } },
+          { artistName: { contains: term, mode: "insensitive" } },
+          { genre: { contains: term, mode: "insensitive" } },
+          { albumTitle: { contains: term, mode: "insensitive" } },
+          { releaseDescription: { contains: term, mode: "insensitive" } },
+        ],
+      },
+      orderBy: { createdAt: "desc" },
+      take: 24,
+      select: trackSelect,
+    });
+  }
+
   listMine(artistId: string) {
     return this.prisma.track.findMany({
       where: { artistId },
@@ -55,6 +74,77 @@ export class TracksService {
     });
     if (!track) throw new NotFoundException("Track not found.");
     return track;
+  }
+
+  async listAlbums() {
+    const tracks = await this.prisma.track.findMany({
+      where: { releaseType: "ALBUM", albumTitle: { not: null } },
+      orderBy: { createdAt: "desc" },
+      take: 500,
+      select: trackSelect,
+    });
+    const albums = new Map<string, {
+      id: string;
+      artistId: string;
+      title: string;
+      artistName: string;
+      coverUrl: string | null;
+      releaseDescription: string | null;
+      trackCount: number;
+      createdAt: Date;
+    }>();
+
+    for (const track of tracks) {
+      if (!track.albumTitle) continue;
+      const key = `${track.artistId}\0${track.albumTitle}`;
+      const album = albums.get(key);
+      if (album) {
+        album.trackCount += 1;
+      } else {
+        albums.set(key, {
+          id: track.id,
+          artistId: track.artistId,
+          title: track.albumTitle,
+          artistName: track.artistName,
+          coverUrl: track.coverUrl,
+          releaseDescription: track.releaseDescription,
+          trackCount: 1,
+          createdAt: track.createdAt,
+        });
+      }
+    }
+
+    return [...albums.values()];
+  }
+
+  async getAlbum(trackId: string) {
+    const track = await this.prisma.track.findUnique({
+      where: { id: trackId },
+      select: { artistId: true, albumTitle: true, releaseType: true },
+    });
+    if (!track || track.releaseType !== "ALBUM" || !track.albumTitle) {
+      throw new NotFoundException("Album not found.");
+    }
+
+    const tracks = await this.prisma.track.findMany({
+      where: {
+        artistId: track.artistId,
+        albumTitle: track.albumTitle,
+        releaseType: "ALBUM",
+      },
+      orderBy: { createdAt: "asc" },
+      select: trackSelect,
+    });
+    if (!tracks.length) throw new NotFoundException("Album not found.");
+    return {
+      id: tracks[0].id,
+      artistId: tracks[0].artistId,
+      title: track.albumTitle,
+      artistName: tracks[0].artistName,
+      coverUrl: tracks[0].coverUrl,
+      releaseDescription: tracks[0].releaseDescription,
+      tracks,
+    };
   }
 
   async recordListen(userId: string, trackId: string, playbackId: string, city?: string) {

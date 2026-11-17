@@ -8,5 +8,6 @@ import { ArtistsService } from "./artists.service";
   imports: [AuthModule],
   controllers: [ArtistsController],
   providers: [JwtAuthGuard, ArtistsService],
+  exports: [ArtistsService],
 })
 export class ArtistsModule {}

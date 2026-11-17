@@ -11,12 +11,21 @@ import { JwtService } from "@nestjs/jwt";
 import { compare, hash } from "bcryptjs";
 import { randomInt } from "node:crypto";
 import { PrismaService } from "../prisma/prisma.service";
-import { LoginDto, RegisterDto } from "./auth.dto";
+import {
+  ForgotPasswordDto,
+  LoginDto,
+  RegisterDto,
+  ResendEmailVerificationDto,
+  ResetPasswordDto,
+} from "./auth.dto";
 import { EmailVerificationService } from "./email-verification.service";
 
 const emailVerificationCodeLifetimeMs = 10 * 60 * 1000;
 const emailVerificationResendDelayMs = 60 * 1000;
 const emailVerificationMaxAttempts = 5;
+const passwordResetCodeLifetimeMs = 10 * 60 * 1000;
+const passwordResetResendDelayMs = 60 * 1000;
+const passwordResetMaxAttempts = 5;
 
 @Injectable()
 export class AuthService {
@@ -29,7 +38,28 @@ export class AuthService {
   async register(input: RegisterDto) {
     const email = input.email.trim().toLowerCase();
     const existing = await this.prisma.user.findUnique({ where: { email } });
-    if (existing) throw new ConflictException("An account with this email already exists.");
+    if (existing) {
+      if (existing.emailVerifiedAt) {
+        throw new ConflictException("An account with this email already exists. Please log in.");
+      }
+      if (!(await compare(input.password, existing.passwordHash))) {
+        throw new ConflictException(
+          "An account with this email already exists. Log in with your password to continue verification.",
+        );
+      }
+      if (existing.name !== input.name.trim()) {
+        await this.prisma.user.update({
+          where: { id: existing.id },
+          data: { name: input.name.trim() },
+        });
+      }
+      return this.requestEmailVerification({
+        id: existing.id,
+        email: existing.email,
+        name: input.name.trim(),
+      });
+    }
+
     const user = await this.prisma.user.create({
       data: {
         email,
@@ -56,6 +86,10 @@ export class AuthService {
     }
     if (!user.emailVerifiedAt) return this.requestEmailVerification(user);
     return this.session(user);
+  }
+
+  async resendEmailVerification(input: ResendEmailVerificationDto) {
+    return this.login(input);
   }
 
   async requestEmailVerificationForUser(userId: string) {
@@ -162,6 +196,139 @@ export class AuthService {
     return this.session(updatedUser);
   }
 
+  async forgotPassword(input: ForgotPasswordDto) {
+    const email = input.email.trim().toLowerCase();
+    const accepted = {
+      accepted: true as const,
+      email,
+      message: "If an account exists for that email, a reset code is on the way.",
+    };
+    const user = await this.prisma.user.findUnique({ where: { email } });
+    if (!user) return accepted;
+
+    const now = new Date();
+    const resendBefore = new Date(now.getTime() - passwordResetResendDelayMs);
+    if (user.passwordResetLastSentAt && user.passwordResetLastSentAt > resendBefore) {
+      return {
+        ...accepted,
+        expiresInSeconds: user.passwordResetExpiresAt && user.passwordResetExpiresAt > now
+          ? Math.ceil((user.passwordResetExpiresAt.getTime() - now.getTime()) / 1000)
+          : passwordResetCodeLifetimeMs / 1000,
+        sent: false,
+      };
+    }
+
+    const code = randomInt(0, 1_000_000).toString().padStart(6, "0");
+    const codeHash = await hash(code, 10);
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordResetCodeHash: codeHash,
+        passwordResetExpiresAt: new Date(now.getTime() + passwordResetCodeLifetimeMs),
+        passwordResetLastSentAt: now,
+        passwordResetAttempts: 0,
+      },
+    });
+
+    try {
+      await this.emailVerification.sendPasswordResetCode({
+        email: user.email,
+        name: user.name,
+        code,
+      });
+    } catch (error) {
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: {
+          passwordResetCodeHash: null,
+          passwordResetExpiresAt: null,
+          passwordResetLastSentAt: null,
+          passwordResetAttempts: 0,
+        },
+      });
+      throw error;
+    }
+
+    return {
+      ...accepted,
+      expiresInSeconds: passwordResetCodeLifetimeMs / 1000,
+      sent: true,
+    };
+  }
+
+  async resetPassword(input: ResetPasswordDto) {
+    const email = input.email.trim().toLowerCase();
+    const user = await this.prisma.user.findUnique({ where: { email } });
+    if (!user || !user.passwordResetCodeHash || !user.passwordResetExpiresAt) {
+      throw new UnauthorizedException("Email or reset code is incorrect.");
+    }
+
+    const now = new Date();
+    if (user.passwordResetExpiresAt <= now) {
+      await this.clearPasswordResetCode(user.id, user.passwordResetCodeHash);
+      throw new BadRequestException("That code has expired. Request a new one.");
+    }
+    if (user.passwordResetAttempts >= passwordResetMaxAttempts) {
+      await this.clearPasswordResetCode(user.id, user.passwordResetCodeHash);
+      throw new HttpException(
+        "Too many incorrect codes. Request a new one.",
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
+    const matches = await compare(input.code, user.passwordResetCodeHash);
+    if (!matches) {
+      const attempt = await this.prisma.user.updateMany({
+        where: {
+          id: user.id,
+          passwordResetCodeHash: user.passwordResetCodeHash,
+          passwordResetExpiresAt: { gt: now },
+          passwordResetAttempts: { lt: passwordResetMaxAttempts },
+        },
+        data: { passwordResetAttempts: { increment: 1 } },
+      });
+      if (attempt.count === 0) {
+        throw new BadRequestException("That code has expired or is no longer valid.");
+      }
+      if (user.passwordResetAttempts + 1 >= passwordResetMaxAttempts) {
+        await this.clearPasswordResetCode(user.id, user.passwordResetCodeHash);
+        throw new HttpException(
+          "Too many incorrect codes. Request a new one.",
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
+      }
+      throw new BadRequestException("The reset code is incorrect.");
+    }
+
+    const passwordHash = await hash(input.password, 12);
+    const updated = await this.prisma.user.updateMany({
+      where: {
+        id: user.id,
+        passwordResetCodeHash: user.passwordResetCodeHash,
+        passwordResetExpiresAt: { gt: now },
+        passwordResetAttempts: { lt: passwordResetMaxAttempts },
+      },
+      data: {
+        passwordHash,
+        emailVerifiedAt: user.emailVerifiedAt ?? now,
+        passwordResetCodeHash: null,
+        passwordResetExpiresAt: null,
+        passwordResetLastSentAt: null,
+        passwordResetAttempts: 0,
+        emailVerificationCodeHash: null,
+        emailVerificationExpiresAt: null,
+        emailVerificationLastSentAt: null,
+        emailVerificationAttempts: 0,
+      },
+    });
+    if (updated.count === 0) {
+      throw new BadRequestException("That code has expired or is no longer valid.");
+    }
+
+    const updatedUser = await this.prisma.user.findUniqueOrThrow({ where: { id: user.id } });
+    return this.session(updatedUser);
+  }
+
   private async requestEmailVerification(user: { id: string; email: string; name: string }) {
     const now = new Date();
     const resendBefore = new Date(now.getTime() - emailVerificationResendDelayMs);
@@ -252,6 +419,17 @@ export class AuthService {
         emailVerificationCodeHash: null,
         emailVerificationExpiresAt: null,
         emailVerificationAttempts: 0,
+      },
+    });
+  }
+
+  private async clearPasswordResetCode(userId: string, codeHash: string) {
+    await this.prisma.user.updateMany({
+      where: { id: userId, passwordResetCodeHash: codeHash },
+      data: {
+        passwordResetCodeHash: null,
+        passwordResetExpiresAt: null,
+        passwordResetAttempts: 0,
       },
     });
   }
