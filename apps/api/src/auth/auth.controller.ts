@@ -1,6 +1,6 @@
 import { Body, Controller, Post, Req, UseGuards } from "@nestjs/common";
 import { AuthService } from "./auth.service";
-import { LoginDto, RegisterDto, VerifyArtistEmailDto } from "./auth.dto";
+import { LoginDto, RegisterDto, VerifyEmailDto } from "./auth.dto";
 import { AuthenticatedRequest, JwtAuthGuard } from "./jwt-auth.guard";
 
 @Controller("auth")
@@ -17,18 +17,20 @@ export class AuthController {
     return this.auth.login(input);
   }
 
+  @Post("request-email-verification")
+  @UseGuards(JwtAuthGuard)
+  requestEmailVerification(@Req() request: AuthenticatedRequest) {
+    return this.auth.requestEmailVerificationForUser(request.user.sub);
+  }
+
   @Post("become-artist")
   @UseGuards(JwtAuthGuard)
   becomeArtist(@Req() request: AuthenticatedRequest) {
-    return this.auth.requestArtistVerification(request.user.sub);
+    return this.auth.becomeArtist(request.user.sub);
   }
 
-  @Post("verify-artist-email")
-  @UseGuards(JwtAuthGuard)
-  verifyArtistEmail(
-    @Req() request: AuthenticatedRequest,
-    @Body() input: VerifyArtistEmailDto,
-  ) {
-    return this.auth.verifyArtistEmail(request.user.sub, input.code);
+  @Post("verify-email")
+  verifyEmail(@Body() input: VerifyEmailDto) {
+    return this.auth.verifyEmail(input.email, input.code);
   }
 }

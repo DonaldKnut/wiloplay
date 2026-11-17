@@ -198,8 +198,8 @@ body{background:var(--bg);color:var(--ink)}
 .modal-subtitle strong{color:#e2ece2}
 .modal-form label{color:#c1cbc2}
 .modal-form input{background:#0b100c;border-color:#2a392c;color:#edf5ed}
-.modal-form .artist-verification-code{font-family:var(--mono);font-size:22px;font-weight:600;letter-spacing:.45em;padding-left:calc(13px + .45em);text-align:center}
-.modal-form .artist-verification-code::placeholder{letter-spacing:.45em}
+.modal-form .email-verification-code{font-family:var(--mono);font-size:22px;font-weight:600;letter-spacing:.45em;padding-left:calc(13px + .45em);text-align:center}
+.modal-form .email-verification-code::placeholder{letter-spacing:.45em}
 .modal-form select{background:#0b100c;border:1px solid #2a392c;border-radius:4px;color:#edf5ed;font:inherit;padding:11px 10px}
 .modal-form select:focus{border-color:#78b956;outline:2px solid #78b95655}
 .modal-form input:focus{background:#111a13;border-color:#78b956}

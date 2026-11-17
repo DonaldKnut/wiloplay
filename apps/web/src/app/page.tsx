@@ -145,7 +145,16 @@ type ArtistBankAccount = {
   accountName: string | null;
 };
 
-type User = { id: string; name: string; email: string; role: string };
+type User = { id: string; name: string; email: string; role: string; emailVerifiedAt?: string | null };
+type AuthSession = { accessToken: string; user: User };
+type EmailVerificationChallenge = {
+  verificationRequired: true;
+  email: string;
+  expiresInSeconds: number;
+  sent: boolean;
+};
+type EmailVerificationStatus = { emailVerifiedAt: string };
+type AuthResponse = AuthSession | EmailVerificationChallenge;
 type TicketItem = {
   id: string;
   code: string;
@@ -193,7 +202,7 @@ type PurchaseResult = TicketOrder & {
   emailMessage?: string;
 };
 type PaymentMode = "demo" | "paystack";
-type Modal = "login" | "signup" | "artist-verification" | "upload" | "event" | "checkout" | "purchase-result" | null;
+type Modal = "login" | "signup" | "email-verification" | "upload" | "event" | "checkout" | "purchase-result" | null;
 type BarcodeDetectorConstructor = new (options: { formats: string[] }) => {
   detect(video: HTMLVideoElement): Promise<{ rawValue: string }[]>;
 };
@@ -466,9 +475,9 @@ export default function HomePage() {
   const [modal, setModal] = useState<Modal>(null);
   const [authMode, setAuthMode] = useState<"login" | "signup">("signup");
   const [authDraft, setAuthDraft] = useState({ name: "", email: "", password: "" });
-  const [artistVerificationEmail, setArtistVerificationEmail] = useState("");
-  const [artistVerificationCode, setArtistVerificationCode] = useState("");
-  const [artistVerificationExpiresInSeconds, setArtistVerificationExpiresInSeconds] = useState(0);
+  const [verificationEmail, setVerificationEmail] = useState("");
+  const [verificationCode, setVerificationCode] = useState("");
+  const [verificationExpiresInSeconds, setVerificationExpiresInSeconds] = useState(0);
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
@@ -534,6 +543,40 @@ export default function HomePage() {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!token || !user || user.emailVerifiedAt !== undefined) return;
+    let active = true;
+    void request<EmailVerificationChallenge | EmailVerificationStatus | AuthSession>(
+      "/auth/request-email-verification",
+      token,
+      { method: "POST" },
+    ).then((result) => {
+      if (!active) return;
+      if ("verificationRequired" in result) {
+        setVerificationEmail(result.email);
+        setVerificationExpiresInSeconds(result.expiresInSeconds);
+        setVerificationCode("");
+        setModal("email-verification");
+        showMessage(result.sent
+          ? `A verification code was sent to ${result.email}.`
+          : `A verification code was already sent to ${result.email}.`);
+      } else if ("accessToken" in result) {
+        establishSession(result, "Your email is verified. Welcome to Wiloplay.");
+      } else {
+        const verifiedUser = { ...user, emailVerifiedAt: result.emailVerifiedAt };
+        localStorage.setItem("sonora-user", JSON.stringify(verifiedUser));
+        setUser(verifiedUser);
+      }
+    }).catch((reason: unknown) => {
+      if (active) {
+        showMessage(reason instanceof Error ? reason.message : "Email verification could not be started.");
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [token, user]);
 
   const loadMyTicketOrders = useCallback(async () => {
     if (!token) return;
@@ -945,26 +988,144 @@ export default function HomePage() {
     }
   }
 
+  function closeModal() {
+    setModal(null);
+    setError("");
+    setPurchaseResult(null);
+    if (modal === "email-verification") {
+      setAuthDraft((draft) => ({ ...draft, password: "" }));
+      setVerificationCode("");
+      if (token && !user?.emailVerifiedAt) logout();
+    }
+  }
+
   async function handleAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
     setBusy(true);
     const data = Object.fromEntries(new FormData(event.currentTarget).entries());
     try {
-      const result = await request<{ accessToken: string; user: User }>(
+      const result = await request<AuthResponse>(
         `/auth/${authMode}`,
         null,
         { method: "POST", body: JSON.stringify(data) },
       );
-      localStorage.setItem("sonora-token", result.accessToken);
-      localStorage.setItem("sonora-user", JSON.stringify(result.user));
-      setToken(result.accessToken);
-      setUser(result.user);
-      setAuthDraft({ name: "", email: "", password: "" });
-      setModal(checkoutEvent ? "checkout" : null);
-      showMessage(`You're in, ${result.user.name.split(" ")[0]}. Welcome to Wiloplay.`);
+      if ("verificationRequired" in result) {
+        setVerificationEmail(result.email);
+        setVerificationExpiresInSeconds(result.expiresInSeconds);
+        setVerificationCode("");
+        setModal("email-verification");
+        showMessage(result.sent
+          ? `A verification code was sent to ${result.email}.`
+          : `A verification code was already sent to ${result.email}.`);
+        return;
+      }
+      establishSession(result, `You're in, ${result.user.name.split(" ")[0]}. Welcome to Wiloplay.`);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to sign in.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function establishSession(session: AuthSession, message: string) {
+    localStorage.setItem("sonora-token", session.accessToken);
+    localStorage.setItem("sonora-user", JSON.stringify(session.user));
+    setToken(session.accessToken);
+    setUser(session.user);
+    setAuthDraft({ name: "", email: "", password: "" });
+    setVerificationCode("");
+    setModal(checkoutEvent ? "checkout" : null);
+    showMessage(message);
+  }
+
+  async function resendEmailVerification() {
+    if (!authDraft.email || !authDraft.password) {
+      if (token) {
+        setBusy(true);
+        setError("");
+        try {
+          const result = await request<EmailVerificationChallenge | EmailVerificationStatus | AuthSession>(
+            "/auth/request-email-verification",
+            token,
+            { method: "POST" },
+          );
+          if ("verificationRequired" in result) {
+            setVerificationEmail(result.email);
+            setVerificationExpiresInSeconds(result.expiresInSeconds);
+            setVerificationCode("");
+            showMessage(result.sent
+              ? `A new verification code was sent to ${result.email}.`
+              : `A code was already sent to ${result.email}.`);
+          } else if ("accessToken" in result) {
+            establishSession(result, "Your email is verified. Welcome to Wiloplay.");
+          } else {
+            if (user) {
+              const verifiedUser = { ...user, emailVerifiedAt: result.emailVerifiedAt };
+              localStorage.setItem("sonora-user", JSON.stringify(verifiedUser));
+              setUser(verifiedUser);
+            }
+            setModal(null);
+            showMessage("Your email is verified.");
+          }
+        } catch (reason) {
+          setError(reason instanceof Error ? reason.message : "Could not resend the verification code.");
+        } finally {
+          setBusy(false);
+        }
+        return;
+      }
+
+      setAuthMode("login");
+      setAuthDraft((draft) => ({ name: "", email: verificationEmail, password: "" }));
+      setModal("login");
+      setError("Sign in again to request a new verification code.");
+      return;
+    }
+
+    setBusy(true);
+    setError("");
+    try {
+      const result = await request<AuthResponse>(
+        "/auth/login",
+        null,
+        {
+          method: "POST",
+          body: JSON.stringify({ email: authDraft.email, password: authDraft.password }),
+        },
+      );
+      if ("verificationRequired" in result) {
+        setVerificationEmail(result.email);
+        setVerificationExpiresInSeconds(result.expiresInSeconds);
+        showMessage(result.sent
+          ? `A new verification code was sent to ${result.email}.`
+          : `A code was already sent to ${result.email}.`);
+      } else {
+        establishSession(result, "Your email is verified. Welcome to Wiloplay.");
+      }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not resend the verification code.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function verifyEmail(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      const result = await request<AuthSession>(
+        "/auth/verify-email",
+        null,
+        {
+          method: "POST",
+          body: JSON.stringify({ email: verificationEmail, code: verificationCode }),
+        },
+      );
+      establishSession(result, "Your email is verified. Welcome to Wiloplay.");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not verify your email.");
     } finally {
       setBusy(false);
     }
@@ -990,51 +1151,16 @@ export default function HomePage() {
     setBusy(true);
     setError("");
     try {
-      const result = await request<{ email: string; expiresInSeconds: number; sent: boolean }>(
+      const result = await request<AuthSession>(
         "/auth/become-artist",
         token,
         { method: "POST" },
       );
-      setArtistVerificationEmail(result.email);
-      setArtistVerificationExpiresInSeconds(result.expiresInSeconds);
-      setArtistVerificationCode("");
-      setModal("artist-verification");
-      showMessage(result.sent
-        ? `A 6-digit verification code was sent to ${result.email}.`
-        : `A verification code was already sent to ${result.email}.`);
+      establishSession(result, "Your artist profile is ready. Let's make something.");
     } catch (reason) {
-      const message = reason instanceof Error ? reason.message : "Could not send the verification code.";
+      const message = reason instanceof Error ? reason.message : "Could not update your account.";
       setError(message);
       showMessage(message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function verifyArtistEmail(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!token) {
-      setError("Please sign in again before verifying your artist email.");
-      return;
-    }
-
-    setBusy(true);
-    setError("");
-    try {
-      const result = await request<{ accessToken: string; user: User }>(
-        "/auth/verify-artist-email",
-        token,
-        { method: "POST", body: JSON.stringify({ code: artistVerificationCode }) },
-      );
-      localStorage.setItem("sonora-token", result.accessToken);
-      localStorage.setItem("sonora-user", JSON.stringify(result.user));
-      setToken(result.accessToken);
-      setUser(result.user);
-      setArtistVerificationCode("");
-      setModal(null);
-      showMessage("Your email is verified. Your artist profile is ready.");
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Could not verify your email.");
     } finally {
       setBusy(false);
     }
@@ -1869,9 +1995,9 @@ export default function HomePage() {
 
       {notice && <div className="toast" role="status"><span><Check size={15} /></span>{notice}<button onClick={() => setNotice("")} aria-label="Dismiss"><X size={14} /></button></div>}
 
-      {modal && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) { setModal(null); setError(""); } }}>
+      {modal && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeModal(); }}>
         <section key={modal} className={`modal-card${modal === "upload" || modal === "event" ? " wizard-modal" : ""}`} role="dialog" aria-modal="true" aria-labelledby="modal-heading">
-          <button className="modal-close" aria-label="Close dialog" onClick={() => { setModal(null); setError(""); setPurchaseResult(null); }}><X size={18} /></button>
+          <button className="modal-close" aria-label="Close dialog" onClick={closeModal}><X size={18} /></button>
           <div className="modal-logo"><AudioLines size={21} /></div>
           {modal === "login" || modal === "signup" ? <>
             <span className="section-kicker">YOUR PEOPLE ARE HERE</span><h2 id="modal-heading">{authMode === "signup" ? "Find your people." : "Good to have you back."}</h2><p className="modal-subtitle">{authMode === "signup" ? "One account. Every song that feels like you." : "Pick up right where the music left off."}</p>
@@ -1882,15 +2008,15 @@ export default function HomePage() {
               {error && <div className="form-error" role="alert">{error}</div>}<button className="form-submit" disabled={busy}>{busy ? "One second..." : authMode === "signup" ? "Create your account" : "Log in"} <ArrowRight size={15} /></button>
             </form>
             <p className="modal-switch">{authMode === "signup" ? "Already found us?" : "New around here?"} <button onClick={() => { setAuthMode(authMode === "signup" ? "login" : "signup"); setAuthDraft((draft) => ({ ...draft, password: "" })); setError(""); }}>{authMode === "signup" ? "Log in" : "Make an account"}</button></p>
-          </> : modal === "artist-verification" ? <>
-            <span className="section-kicker">ONE LAST STEP</span><h2 id="modal-heading">Verify your artist email.</h2>
-            <p className="modal-subtitle">We sent a six-digit code to <strong>{artistVerificationEmail}</strong>. It expires in {Math.max(1, Math.ceil(artistVerificationExpiresInSeconds / 60))} minutes.</p>
-            <form className="modal-form" onSubmit={(event) => void verifyArtistEmail(event)}>
-              <label>Verification code<input className="artist-verification-code" name="code" type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} placeholder="000000" value={artistVerificationCode} onChange={(event) => setArtistVerificationCode(event.target.value.replace(/\D/g, "").slice(0, 6))} required /></label>
+          </> : modal === "email-verification" ? <>
+            <span className="section-kicker">CHECK YOUR INBOX</span><h2 id="modal-heading">Verify your email.</h2>
+            <p className="modal-subtitle">We sent a six-digit code to <strong>{verificationEmail}</strong>. It expires in {Math.max(1, Math.ceil(verificationExpiresInSeconds / 60))} minutes.</p>
+            <form className="modal-form" onSubmit={(event) => void verifyEmail(event)}>
+              <label>Verification code<input className="email-verification-code" name="code" type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} placeholder="000000" value={verificationCode} onChange={(event) => setVerificationCode(event.target.value.replace(/\D/g, "").slice(0, 6))} required /></label>
               {error && <div className="form-error" role="alert">{error}</div>}
-              <button className="form-submit" disabled={busy || artistVerificationCode.length !== 6}>{busy ? "Verifying..." : "Verify artist email"} <ArrowRight size={15} /></button>
+              <button className="form-submit" disabled={busy || verificationCode.length !== 6}>{busy ? "Verifying..." : "Verify email"} <ArrowRight size={15} /></button>
             </form>
-            <p className="modal-switch">Didn&apos;t get a code? <button type="button" disabled={busy} onClick={() => void becomeArtist()}>Resend code</button></p>
+            <p className="modal-switch">Didn&apos;t get a code? <button type="button" disabled={busy} onClick={() => void resendEmailVerification()}>Resend code</button></p>
           </> : modal === "upload" ? <>
             <span className="section-kicker">GET YOUR MUSIC OUT THERE</span><h2 id="modal-heading">Share a new release.</h2><p className="modal-subtitle">Upload a single or group tracks into an album with one shared cover.</p>
             <form className="modal-form wizard-form" ref={uploadFormRef} onSubmit={(event) => void uploadTrack(event)}>

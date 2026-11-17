@@ -15,8 +15,8 @@ function escapeHtml(value: string) {
 }
 
 @Injectable()
-export class ArtistVerificationEmailService {
-  private readonly logger = new Logger(ArtistVerificationEmailService.name);
+export class EmailVerificationService {
+  private readonly logger = new Logger(EmailVerificationService.name);
   private readonly transporter: Transporter | null;
 
   constructor() {
@@ -44,13 +44,13 @@ export class ArtistVerificationEmailService {
       await this.transporter.sendMail({
         from,
         to: input.email,
-        subject: "Verify your Wiloplay artist email",
-        text: `Hi ${input.name}, your Wiloplay artist verification code is ${input.code}. It expires in 10 minutes.`,
+        subject: "Verify your Wiloplay email",
+        text: `Hi ${input.name}, your Wiloplay email verification code is ${input.code}. It expires in 10 minutes.`,
         html: `
           <main style="color:#142016;font-family:Arial,sans-serif;line-height:1.6;max-width:560px;margin:auto">
-            <h1>Verify your artist email.</h1>
+            <h1>Verify your email.</h1>
             <p>Hi ${escapeHtml(input.name)},</p>
-            <p>Enter this code in Wiloplay to finish setting up your artist account:</p>
+            <p>Enter this code in Wiloplay to verify your email address:</p>
             <p style="background:#eff7ed;border-radius:12px;color:#23421f;font-size:30px;font-weight:bold;letter-spacing:8px;padding:18px;text-align:center">${input.code}</p>
             <p>This code expires in 10 minutes. If you did not request it, you can ignore this email.</p>
           </main>
@@ -58,7 +58,7 @@ export class ArtistVerificationEmailService {
       });
     } catch (error) {
       this.logger.error(
-        "Artist verification email delivery failed",
+        "Email verification delivery failed",
         error instanceof Error ? error.stack : String(error),
       );
       throw new ServiceUnavailableException("Unable to send the verification email. Please try again later.");

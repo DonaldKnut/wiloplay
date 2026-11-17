@@ -14,11 +14,11 @@ model User {
   passwordHash String
   role         String   @default("LISTENER")
   artistVerifiedAt DateTime?
-  artistEmailVerifiedAt DateTime?
-  artistVerificationCodeHash String?
-  artistVerificationExpiresAt DateTime?
-  artistVerificationLastSentAt DateTime?
-  artistVerificationAttempts Int @default(0)
+  emailVerifiedAt DateTime? @map("artistEmailVerifiedAt")
+  emailVerificationCodeHash String? @map("artistVerificationCodeHash")
+  emailVerificationExpiresAt DateTime? @map("artistVerificationExpiresAt")
+  emailVerificationLastSentAt DateTime? @map("artistVerificationLastSentAt")
+  emailVerificationAttempts Int @default(0) @map("artistVerificationAttempts")
   createdAt    DateTime @default(now())
   tracks       Track[]
   events       Event[]

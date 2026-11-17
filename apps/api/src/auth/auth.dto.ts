@@ -27,7 +27,11 @@ export class LoginDto {
   password!: string;
 }
 
-export class VerifyArtistEmailDto {
+export class VerifyEmailDto {
+  @IsEmail()
+  @MaxLength(254)
+  email!: string;
+
   @IsString()
   @Matches(/^\d{6}$/)
   code!: string;

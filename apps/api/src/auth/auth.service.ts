@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   HttpException,
   HttpStatus,
   Injectable,
@@ -11,18 +12,18 @@ import { compare, hash } from "bcryptjs";
 import { randomInt } from "node:crypto";
 import { PrismaService } from "../prisma/prisma.service";
 import { LoginDto, RegisterDto } from "./auth.dto";
-import { ArtistVerificationEmailService } from "./artist-verification-email.service";
+import { EmailVerificationService } from "./email-verification.service";
 
-const artistVerificationCodeLifetimeMs = 10 * 60 * 1000;
-const artistVerificationResendDelayMs = 60 * 1000;
-const artistVerificationMaxAttempts = 5;
+const emailVerificationCodeLifetimeMs = 10 * 60 * 1000;
+const emailVerificationResendDelayMs = 60 * 1000;
+const emailVerificationMaxAttempts = 5;
 
 @Injectable()
 export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
-    private readonly artistVerificationEmail: ArtistVerificationEmailService,
+    private readonly emailVerification: EmailVerificationService,
   ) {}
 
   async register(input: RegisterDto) {
@@ -36,7 +37,14 @@ export class AuthService {
         passwordHash: await hash(input.password, 12),
       },
     });
-    return this.session(user);
+    try {
+      return await this.requestEmailVerification(user);
+    } catch (error) {
+      await this.prisma.user.deleteMany({
+        where: { id: user.id, emailVerifiedAt: null },
+      });
+      throw error;
+    }
   }
 
   async login(input: LoginDto) {
@@ -46,140 +54,82 @@ export class AuthService {
     if (!user || !(await compare(input.password, user.passwordHash))) {
       throw new UnauthorizedException("Email or password is incorrect.");
     }
+    if (!user.emailVerifiedAt) return this.requestEmailVerification(user);
     return this.session(user);
   }
 
-  async requestArtistVerification(userId: string) {
+  async requestEmailVerificationForUser(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        artistEmailVerifiedAt: true,
-      },
+      select: { id: true, email: true, name: true, emailVerifiedAt: true },
     });
     if (!user) throw new UnauthorizedException("Please sign in again.");
-    if (user.artistEmailVerifiedAt) {
-      throw new ConflictException("Your artist email is already verified.");
+    if (user.emailVerifiedAt) {
+      return { emailVerifiedAt: user.emailVerifiedAt.toISOString() };
     }
-
-    const now = new Date();
-    const resendBefore = new Date(now.getTime() - artistVerificationResendDelayMs);
-    const code = randomInt(0, 1_000_000).toString().padStart(6, "0");
-    const codeHash = await hash(code, 10);
-    const claimed = await this.prisma.user.updateMany({
-      where: {
-        id: userId,
-        artistEmailVerifiedAt: null,
-        OR: [
-          { artistVerificationLastSentAt: null },
-          { artistVerificationLastSentAt: { lte: resendBefore } },
-        ],
-      },
-      data: {
-        artistVerificationCodeHash: codeHash,
-        artistVerificationExpiresAt: new Date(now.getTime() + artistVerificationCodeLifetimeMs),
-        artistVerificationLastSentAt: now,
-        artistVerificationAttempts: 0,
-      },
-    });
-    if (claimed.count === 0) {
-      const current = await this.prisma.user.findUnique({
-        where: { id: userId },
-        select: {
-          artistEmailVerifiedAt: true,
-          artistVerificationCodeHash: true,
-          artistVerificationExpiresAt: true,
-          artistVerificationAttempts: true,
-        },
-      });
-      if (current?.artistEmailVerifiedAt) {
-        throw new ConflictException("Your artist email is already verified.");
-      }
-      if (
-        current?.artistVerificationCodeHash
-        && current.artistVerificationExpiresAt
-        && current.artistVerificationExpiresAt > now
-        && current.artistVerificationAttempts < artistVerificationMaxAttempts
-      ) {
-        return {
-          email: user.email,
-          expiresInSeconds: Math.ceil((current.artistVerificationExpiresAt.getTime() - now.getTime()) / 1000),
-          sent: false,
-        };
-      }
-      throw new HttpException(
-        "Please wait a minute before requesting another code.",
-        HttpStatus.TOO_MANY_REQUESTS,
-      );
-    }
-
-    try {
-      await this.artistVerificationEmail.sendCode({
-        email: user.email,
-        name: user.name,
-        code,
-      });
-    } catch (error) {
-      await this.prisma.user.updateMany({
-        where: { id: userId, artistVerificationCodeHash: codeHash },
-        data: {
-          artistVerificationCodeHash: null,
-          artistVerificationExpiresAt: null,
-          artistVerificationLastSentAt: null,
-          artistVerificationAttempts: 0,
-        },
-      });
-      throw error;
-    }
-
-    return {
-      email: user.email,
-      expiresInSeconds: artistVerificationCodeLifetimeMs / 1000,
-      sent: true,
-    };
+    return this.requestEmailVerification(user);
   }
 
-  async verifyArtistEmail(userId: string, code: string) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+  async becomeArtist(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { emailVerifiedAt: true },
+    });
     if (!user) throw new UnauthorizedException("Please sign in again.");
-    if (user.artistEmailVerifiedAt) return this.session(user);
-    if (!user.artistVerificationCodeHash || !user.artistVerificationExpiresAt) {
+    if (!user.emailVerifiedAt) {
+      throw new ForbiddenException("Verify your email address before creating an artist profile.");
+    }
+
+    const updatedUser = await this.prisma.user.update({
+      where: { id: userId },
+      data: { role: "ARTIST" },
+    });
+    return this.session(updatedUser);
+  }
+
+  async verifyEmail(emailInput: string, code: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { email: emailInput.trim().toLowerCase() },
+    });
+    if (!user) throw new UnauthorizedException("Email or verification code is incorrect.");
+    if (user.emailVerifiedAt) {
+      throw new ConflictException("This email is already verified. Please sign in.");
+    }
+    if (!user.emailVerificationCodeHash || !user.emailVerificationExpiresAt) {
       throw new BadRequestException("Request a new verification code to continue.");
     }
 
     const now = new Date();
-    if (user.artistVerificationExpiresAt <= now) {
-      await this.clearArtistVerificationCode(userId, user.artistVerificationCodeHash);
+    if (user.emailVerificationExpiresAt <= now) {
+      await this.clearEmailVerificationCode(user.id, user.emailVerificationCodeHash);
       throw new BadRequestException("That code has expired. Request a new one.");
     }
-    if (user.artistVerificationAttempts >= artistVerificationMaxAttempts) {
-      await this.clearArtistVerificationCode(userId, user.artistVerificationCodeHash);
+    if (user.emailVerificationAttempts >= emailVerificationMaxAttempts) {
+      await this.clearEmailVerificationCode(user.id, user.emailVerificationCodeHash);
       throw new HttpException(
         "Too many incorrect codes. Request a new one.",
         HttpStatus.TOO_MANY_REQUESTS,
       );
     }
 
-    const matches = await compare(code, user.artistVerificationCodeHash);
+    const matches = await compare(code, user.emailVerificationCodeHash);
     if (!matches) {
       const attemptedAt = new Date();
       const attempt = await this.prisma.user.updateMany({
         where: {
-          id: userId,
-          artistVerificationCodeHash: user.artistVerificationCodeHash,
-          artistVerificationExpiresAt: { gt: attemptedAt },
-          artistVerificationAttempts: { lt: artistVerificationMaxAttempts },
-          artistEmailVerifiedAt: null,
+          id: user.id,
+          emailVerificationCodeHash: user.emailVerificationCodeHash,
+          emailVerificationExpiresAt: { gt: attemptedAt },
+          emailVerificationAttempts: { lt: emailVerificationMaxAttempts },
+          emailVerifiedAt: null,
         },
-        data: { artistVerificationAttempts: { increment: 1 } },
+        data: { emailVerificationAttempts: { increment: 1 } },
       });
       if (attempt.count === 0) {
         throw new BadRequestException("That code has expired or is no longer valid.");
       }
-      if (user.artistVerificationAttempts + 1 >= artistVerificationMaxAttempts) {
-        await this.clearArtistVerificationCode(userId, user.artistVerificationCodeHash);
+      if (user.emailVerificationAttempts + 1 >= emailVerificationMaxAttempts) {
+        await this.clearEmailVerificationCode(user.id, user.emailVerificationCodeHash);
         throw new HttpException(
           "Too many incorrect codes. Request a new one.",
           HttpStatus.TOO_MANY_REQUESTS,
@@ -191,47 +141,147 @@ export class AuthService {
     const verifiedAt = new Date();
     const verified = await this.prisma.user.updateMany({
       where: {
-        id: userId,
-        artistVerificationCodeHash: user.artistVerificationCodeHash,
-        artistVerificationExpiresAt: { gt: verifiedAt },
-        artistVerificationAttempts: { lt: artistVerificationMaxAttempts },
-        artistEmailVerifiedAt: null,
+        id: user.id,
+        emailVerificationCodeHash: user.emailVerificationCodeHash,
+        emailVerificationExpiresAt: { gt: verifiedAt },
+        emailVerificationAttempts: { lt: emailVerificationMaxAttempts },
+        emailVerifiedAt: null,
       },
       data: {
-        role: "ARTIST",
-        artistEmailVerifiedAt: verifiedAt,
-        artistVerificationCodeHash: null,
-        artistVerificationExpiresAt: null,
-        artistVerificationLastSentAt: null,
-        artistVerificationAttempts: 0,
+        emailVerifiedAt: verifiedAt,
+        emailVerificationCodeHash: null,
+        emailVerificationExpiresAt: null,
+        emailVerificationLastSentAt: null,
+        emailVerificationAttempts: 0,
       },
     });
     if (verified.count === 0) {
       throw new BadRequestException("That code has expired or is no longer valid.");
     }
-    const updatedUser = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    const updatedUser = await this.prisma.user.findUniqueOrThrow({ where: { id: user.id } });
     return this.session(updatedUser);
   }
 
-  private async clearArtistVerificationCode(userId: string, codeHash: string) {
-    await this.prisma.user.updateMany({
-      where: { id: userId, artistVerificationCodeHash: codeHash },
+  private async requestEmailVerification(user: { id: string; email: string; name: string }) {
+    const now = new Date();
+    const resendBefore = new Date(now.getTime() - emailVerificationResendDelayMs);
+    const code = randomInt(0, 1_000_000).toString().padStart(6, "0");
+    const codeHash = await hash(code, 10);
+    const claimed = await this.prisma.user.updateMany({
+      where: {
+        id: user.id,
+        emailVerifiedAt: null,
+        OR: [
+          { emailVerificationLastSentAt: null },
+          { emailVerificationLastSentAt: { lte: resendBefore } },
+        ],
+      },
       data: {
-        artistVerificationCodeHash: null,
-        artistVerificationExpiresAt: null,
-        artistVerificationAttempts: 0,
+        emailVerificationCodeHash: codeHash,
+        emailVerificationExpiresAt: new Date(now.getTime() + emailVerificationCodeLifetimeMs),
+        emailVerificationLastSentAt: now,
+        emailVerificationAttempts: 0,
+      },
+    });
+    if (claimed.count === 0) {
+      const current = await this.prisma.user.findUnique({
+        where: { id: user.id },
+        select: {
+          id: true,
+          emailVerifiedAt: true,
+          emailVerificationCodeHash: true,
+          emailVerificationExpiresAt: true,
+          emailVerificationAttempts: true,
+          role: true,
+          email: true,
+          name: true,
+        },
+      });
+      if (!current) throw new UnauthorizedException("Please sign in again.");
+      if (current.emailVerifiedAt) return this.session(current);
+      if (
+        current.emailVerificationCodeHash
+        && current.emailVerificationExpiresAt
+        && current.emailVerificationExpiresAt > now
+        && current.emailVerificationAttempts < emailVerificationMaxAttempts
+      ) {
+        return {
+          verificationRequired: true as const,
+          email: user.email,
+          expiresInSeconds: Math.ceil((current.emailVerificationExpiresAt.getTime() - now.getTime()) / 1000),
+          sent: false,
+        };
+      }
+      throw new HttpException(
+        "Please wait a minute before requesting another code.",
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
+    try {
+      await this.emailVerification.sendCode({
+        email: user.email,
+        name: user.name,
+        code,
+      });
+    } catch (error) {
+      await this.prisma.user.updateMany({
+        where: { id: user.id, emailVerificationCodeHash: codeHash },
+        data: {
+          emailVerificationCodeHash: null,
+          emailVerificationExpiresAt: null,
+          emailVerificationLastSentAt: null,
+          emailVerificationAttempts: 0,
+        },
+      });
+      throw error;
+    }
+
+    return {
+      verificationRequired: true as const,
+      email: user.email,
+      expiresInSeconds: emailVerificationCodeLifetimeMs / 1000,
+      sent: true,
+    };
+  }
+
+  private async clearEmailVerificationCode(userId: string, codeHash: string) {
+    await this.prisma.user.updateMany({
+      where: { id: userId, emailVerificationCodeHash: codeHash },
+      data: {
+        emailVerificationCodeHash: null,
+        emailVerificationExpiresAt: null,
+        emailVerificationAttempts: 0,
       },
     });
   }
 
-  private session(user: { id: string; email: string; name: string; role: string }) {
+  private session(user: {
+    id: string;
+    email: string;
+    name: string;
+    role: string;
+    emailVerifiedAt?: Date | null;
+  }) {
     return {
       accessToken: this.jwt.sign({ sub: user.id, email: user.email, role: user.role }),
       user: this.publicUser(user),
     };
   }
 
-  private publicUser(user: { id: string; email: string; name: string; role: string }) {
-    return { id: user.id, email: user.email, name: user.name, role: user.role };
+  private publicUser(user: {
+    id: string;
+    email: string;
+    name: string;
+    role: string;
+    emailVerifiedAt?: Date | null;
+  }) {
+    return {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      emailVerifiedAt: user.emailVerifiedAt?.toISOString() ?? null,
+    };
   }
 }
