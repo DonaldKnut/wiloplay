@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Script from "next/script";
 import ServiceWorkerRegistration from "./service-worker-registration";
 import ThemeInitializer from "./theme-initializer";
 import "./globals.css";
@@ -35,10 +36,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <head>
-        <script dangerouslySetInnerHTML={{ __html: themeBootScript }} />
-      </head>
       <body>
+        <Script id="wiloplay-theme-boot" strategy="beforeInteractive">
+          {themeBootScript}
+        </Script>
         <ThemeInitializer />
         <ServiceWorkerRegistration />
         {children}

@@ -235,7 +235,7 @@ export default function TicketsPage() {
               return (
                 <Link
                   key={event.id}
-                  href={`/?event=${encodeURIComponent(event.id)}#shows`}
+                  href={`/app?event=${encodeURIComponent(event.id)}#shows`}
                   className="tickets-show"
                 >
                   {event.coverUrl

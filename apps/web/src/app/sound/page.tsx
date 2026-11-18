@@ -174,12 +174,12 @@ export default function SoundPage() {
 
       <div className="sound-shell">
         <header className="sound-nav">
-          <Link href="/" className="sound-brand" aria-label="Wiloplay home">
+          <Link href="/app" className="sound-brand" aria-label="Wiloplay app">
             <span className="sound-brand-mark"><AudioLines size={18} /></span>
             <span>wiloplay<span className="sound-brand-dot">.</span></span>
           </Link>
           <div className="sound-nav-actions">
-            <Link href="/" className="sound-nav-link"><ArrowLeft size={15} /><span>Back home</span></Link>
+            <Link href="/app" className="sound-nav-link"><ArrowLeft size={15} /><span>Back to music</span></Link>
             <a href="#listening" className="sound-cta">Start listening <ArrowRight size={15} /></a>
           </div>
         </header>

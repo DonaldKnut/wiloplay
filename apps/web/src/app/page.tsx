@@ -21,6 +21,7 @@ import {
   Home,
   ImagePlus,
   Info,
+  AlertTriangle,
   LogOut,
   Link2,
   ListMusic,
@@ -756,7 +757,8 @@ export default function HomePage() {
   const [listenCity, setListenCity] = useState("");
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
-  const [searchMinimized, setSearchMinimized] = useState(false);
+  const [searchLeaving, setSearchLeaving] = useState(false);
+  const [searchMinimized, setSearchMinimized] = useState(true);
   const [activeNav, setActiveNav] = useState<
     "home" | "discovery" | "for-you" | "shows" | "my-tickets"
   >("home");
@@ -780,7 +782,12 @@ export default function HomePage() {
   const [verificationExpiresInSeconds, setVerificationExpiresInSeconds] = useState(0);
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
-  const [notice, setNotice] = useState("");
+  const [toasts, setToasts] = useState<Array<{
+    id: string;
+    message: string;
+    tone: "success" | "info" | "error";
+    leaving?: boolean;
+  }>>([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [paymentMode, setPaymentMode] = useState<PaymentMode | null>(null);
@@ -791,6 +798,8 @@ export default function HomePage() {
   const audioRef = useRef<HTMLAudioElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const toastTimers = useRef<Map<string, number>>(new Map());
   const artistDetailsRequestId = useRef(0);
   const countedListenTrackId = useRef<string | null>(null);
   const listenPlaybackId = useRef("");
@@ -1368,7 +1377,7 @@ export default function HomePage() {
         setPlayerExpanded(false);
         return;
       }
-      if (searchOpen) {
+      if (searchOpen || searchLeaving) {
         event.preventDefault();
         closeSearchPanel();
         return;
@@ -1385,14 +1394,14 @@ export default function HomePage() {
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [modal, playerExpanded, searchOpen, searchMinimized, mobileNav]);
+  }, [modal, playerExpanded, searchOpen, searchLeaving, searchMinimized, mobileNav]);
 
   useEffect(() => {
-    document.body.style.overflow = modal || mobileNav || playerExpanded ? "hidden" : "";
+    document.body.style.overflow = modal || mobileNav || playerExpanded || searchOpen ? "hidden" : "";
     return () => {
       document.body.style.overflow = "";
     };
-  }, [modal, mobileNav, playerExpanded]);
+  }, [modal, mobileNav, playerExpanded, searchOpen]);
 
   useEffect(() => {
     const media = window.matchMedia("(min-width: 851px)");
@@ -1404,9 +1413,24 @@ export default function HomePage() {
     return () => media.removeEventListener("change", onChange);
   }, []);
 
-  function showMessage(message: string) {
-    setNotice(message);
-    window.setTimeout(() => setNotice(""), 3800);
+  function dismissToast(id: string) {
+    setToasts((current) =>
+      current.map((toast) => (toast.id === id ? { ...toast, leaving: true } : toast)),
+    );
+    const existing = toastTimers.current.get(id);
+    if (existing) window.clearTimeout(existing);
+    const removeTimer = window.setTimeout(() => {
+      setToasts((current) => current.filter((toast) => toast.id !== id));
+      toastTimers.current.delete(id);
+    }, 260);
+    toastTimers.current.set(id, removeTimer);
+  }
+
+  function showMessage(message: string, tone: "success" | "info" | "error" = "success") {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    setToasts((current) => [...current, { id, message, tone }].slice(-3));
+    const timer = window.setTimeout(() => dismissToast(id), 3800);
+    toastTimers.current.set(id, timer);
   }
 
   function recordPlaybackHistory() {
@@ -1698,21 +1722,35 @@ export default function HomePage() {
   }
 
   function closeSearchPanel() {
+    if (!searchOpen && !searchLeaving) {
+      setSearchMinimized(true);
+      return;
+    }
     setSearchOpen(false);
+    setSearchLeaving(true);
+    if (searchCloseTimer.current) clearTimeout(searchCloseTimer.current);
+    searchCloseTimer.current = setTimeout(() => {
+      setSearchLeaving(false);
+      setSearchMinimized(true);
+      searchCloseTimer.current = null;
+    }, 260);
   }
 
   function toggleSearch() {
     if (searchMinimized) {
       setSearchMinimized(false);
+      setSearchLeaving(false);
+      setSearchOpen(true);
       requestAnimationFrame(() => document.getElementById("global-search")?.focus());
       return;
     }
-    setSearchOpen(false);
+    closeSearchPanel();
     setSearchMinimized(true);
   }
 
   function openSearch() {
     setSearchMinimized(false);
+    setSearchLeaving(false);
     setSearchOpen(true);
     requestAnimationFrame(() => document.getElementById("global-search")?.focus());
   }
@@ -2802,19 +2840,59 @@ export default function HomePage() {
       </aside>
 
       <section className="main-panel" id="home">
-        <header className="topbar">
+        <header className={`topbar${!searchMinimized ? " is-search-focus" : ""}`}>
           <div className="topbar-left">
-            <button className="icon-btn mobile-menu" aria-label="Open menu" onClick={() => setMobileNav(!mobileNav)}><Menu size={19} /></button>
-            <button className="icon-btn top-arrow" aria-label="Go back" onClick={() => window.history.back()}><ArrowLeft size={17} /></button>
-            <button className="icon-btn top-arrow" aria-label="Go forward" onClick={() => window.history.forward()}><ArrowRight size={17} /></button>
-            <div className="search-shell">
-              {searchOpen && <button type="button" className="search-scrim" aria-label="Close search" onClick={closeSearchPanel} />}
-              <form className={`search-box${searchOpen ? " search-focused" : ""}${searchMinimized ? " search-minimized" : ""}`} role="search" onSubmit={(event) => { event.preventDefault(); void searchTracks(query); document.getElementById("track-list")?.scrollIntoView({ behavior: "smooth" }); setSearchOpen(true); }}>
+            <button className="icon-btn mobile-menu topbar-chrome" aria-label="Open menu" onClick={() => setMobileNav(!mobileNav)}><Menu size={19} /></button>
+            <button className="icon-btn top-arrow topbar-chrome" aria-label="Go back" onClick={() => window.history.back()}><ArrowLeft size={17} /></button>
+            <button className="icon-btn top-arrow topbar-chrome" aria-label="Go forward" onClick={() => window.history.forward()}><ArrowRight size={17} /></button>
+            <div className={`search-shell${searchOpen || searchLeaving ? " is-expanded" : ""}${searchMinimized ? " is-minimized" : ""}`}>
+              {(searchOpen || searchLeaving) && (
+                <button
+                  type="button"
+                  className={`search-scrim${searchLeaving ? " is-leaving" : " is-visible"}`}
+                  aria-label="Close search"
+                  tabIndex={searchOpen ? 0 : -1}
+                  onClick={closeSearchPanel}
+                />
+              )}
+              <form
+                className={`search-box${searchOpen ? " search-focused" : ""}${searchMinimized ? " search-minimized" : ""}`}
+                role="search"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  setSearchLeaving(false);
+                  setSearchOpen(true);
+                  void searchTracks(query);
+                  document.getElementById("track-list")?.scrollIntoView({ behavior: "smooth" });
+                }}
+              >
                 <button type="button" className="search-toggle" aria-label={searchMinimized ? "Expand search" : "Minimize search"} aria-expanded={!searchMinimized} aria-controls={searchMinimized ? undefined : "global-search"} onClick={toggleSearch}><Search size={16} /></button>
-                {!searchMinimized && <input id="global-search" aria-label="Search songs, artists, albums, and shows" placeholder="Songs, artists, albums, shows..." value={query} onFocus={() => setSearchOpen(true)} onChange={(event) => onSearchChange(event.target.value)} />}
-                {!searchMinimized && (searchLoading ? <span className="search-loading" aria-live="polite">Searching</span> : query ? <button className="search-clear" type="button" aria-label="Clear search" onClick={() => { setQuery(""); void searchTracks(""); closeSearchPanel(); }}><X size={14} /></button> : null)}
+                {!searchMinimized && (
+                  <input
+                    id="global-search"
+                    aria-label="Search songs, artists, albums, and shows"
+                    placeholder="Songs, artists, albums, shows..."
+                    value={query}
+                    onFocus={() => {
+                      setSearchLeaving(false);
+                      setSearchOpen(true);
+                    }}
+                    onChange={(event) => onSearchChange(event.target.value)}
+                  />
+                )}
+                {!searchMinimized && (searchLoading
+                  ? <span className="search-loading" aria-live="polite">Searching</span>
+                  : query
+                    ? <button className="search-clear" type="button" aria-label="Clear search" onClick={() => { setQuery(""); void searchTracks(""); }}><X size={14} /></button>
+                    : <button className="search-clear" type="button" aria-label="Close search" onClick={closeSearchPanel}><X size={14} /></button>)}
               </form>
-              {searchOpen && (query.trim() || searchResults) && <div className="search-panel" role="listbox" aria-label="Search results">
+              {(searchOpen || searchLeaving) && (query.trim() || searchResults) && (
+              <div
+                className={`search-panel${searchLeaving ? " is-leaving" : " is-open"}`}
+                role="listbox"
+                aria-label="Search results"
+                aria-hidden={searchLeaving}
+              >
                 <div className="search-panel-head">
                   <strong>Search</strong>
                   <button type="button" className="search-panel-close" aria-label="Close search" onMouseDown={(event) => event.preventDefault()} onClick={closeSearchPanel}><X size={15} /></button>
@@ -2837,13 +2915,13 @@ export default function HomePage() {
                 {!searchLoading && !searchError && query.trim() && !searchResults?.totals.all && <p className="search-panel-empty">No matches yet. Try another song, artist, mood, or city.</p>}
                 {!searchLoading && searchResults && (searchFilter === "all" || searchFilter === "wiloplay") && searchResults.tracks.slice(0, 5).map((track) => {
                   const playable = apiTrackToPlayerTrack(track);
-                  return <button type="button" className="search-hit" key={`upload-${track.id}`} onMouseDown={(event) => event.preventDefault()} onClick={() => { toggleTrack(playable); setSearchOpen(false); }}>
+                  return <button type="button" className="search-hit" key={`upload-${track.id}`} onMouseDown={(event) => event.preventDefault()} onClick={() => { toggleTrack(playable); closeSearchPanel(); }}>
                     <Cover src={playable.cover} alt="" /><span><strong>{track.title}</strong><small>{track.artistName} · Wiloplay{track.genre ? ` · ${track.genre}` : ""}</small></span><Play size={13} />
                   </button>;
                 })}
                 {!searchLoading && (searchFilter === "all" || searchFilter === "catalog") && (searchResults?.catalogTracks ?? []).slice(0, 5).map((track) => {
                   const playable = catalogTrackToPlayerTrack(track);
-                  return <button type="button" className="search-hit" key={`catalog-${track.id}`} onMouseDown={(event) => event.preventDefault()} onClick={() => { toggleTrack(playable); setSearchOpen(false); }}>
+                  return <button type="button" className="search-hit" key={`catalog-${track.id}`} onMouseDown={(event) => event.preventDefault()} onClick={() => { toggleTrack(playable); closeSearchPanel(); }}>
                     <Cover src={playable.cover} alt="" /><span><strong>{track.title}</strong><small>{track.artist} · {catalogProviderLabel(track.provider)} · {track.playback === "full" ? "Full" : "Preview"}</small></span><Play size={13} />
                   </button>;
                 })}
@@ -2853,15 +2931,16 @@ export default function HomePage() {
                   </a>
                 ))}
                 {!searchLoading && searchResults && (searchFilter === "all" || searchFilter === "shows") && searchResults.events.slice(0, 5).map((eventItem) => (
-                  <button type="button" className="search-hit" key={`event-${eventItem.id}`} onMouseDown={(event) => event.preventDefault()} onClick={() => { setSearchOpen(false); document.getElementById(`event-${eventItem.id}`)?.scrollIntoView({ behavior: "smooth" }); }}>
+                  <button type="button" className="search-hit" key={`event-${eventItem.id}`} onMouseDown={(event) => event.preventDefault()} onClick={() => { closeSearchPanel(); document.getElementById(`event-${eventItem.id}`)?.scrollIntoView({ behavior: "smooth" }); }}>
                     <Cover src={eventItem.coverUrl ? `${API}${eventItem.coverUrl}` : ""} alt="" /><span><strong>{eventItem.title}</strong><small>{eventItem.artistName} · {eventItem.city} · {formatDate(eventItem.startsAt)}</small></span><Ticket size={13} />
                   </button>
                 ))}
-                {query.trim() && <button type="button" className="search-panel-footer" onMouseDown={(event) => event.preventDefault()} onClick={() => { void searchTracks(query); document.getElementById("track-list")?.scrollIntoView({ behavior: "smooth" }); setSearchOpen(false); }}>See full results <ArrowRight size={14} /></button>}
-              </div>}
+                {query.trim() && <button type="button" className="search-panel-footer" onMouseDown={(event) => event.preventDefault()} onClick={() => { void searchTracks(query); document.getElementById("track-list")?.scrollIntoView({ behavior: "smooth" }); closeSearchPanel(); }}>See full results <ArrowRight size={14} /></button>}
+              </div>
+              )}
             </div>
           </div>
-          <div className="topbar-actions">
+          <div className="topbar-actions topbar-chrome" aria-hidden={!searchMinimized || undefined}>
             <button className="theme-toggle" type="button" aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`} aria-pressed={theme === "light"} title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`} onClick={toggleTheme}>
               {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
               <span>{theme === "dark" ? "Light mode" : "Dark mode"}</span>
@@ -3374,7 +3453,23 @@ export default function HomePage() {
         {!queue.length && !shownTracks.some((track) => track.preview || track.audioUrl) && <p className="queue-empty">Start a track to build your queue.</p>}
       </aside>}
 
-      {notice && <div className="toast" role="status"><span><Check size={15} /></span>{notice}<button onClick={() => setNotice("")} aria-label="Dismiss"><X size={14} /></button></div>}
+      <div className="toast-stack" aria-live="polite" aria-relevant="additions text">
+        {toasts.map((toast) => (
+          <div
+            key={toast.id}
+            className={`toast toast-${toast.tone}${toast.leaving ? " is-leaving" : " is-visible"}`}
+            role="status"
+          >
+            <span className="toast-icon" aria-hidden="true">
+              {toast.tone === "error" ? <AlertTriangle size={15} /> : toast.tone === "info" ? <Info size={15} /> : <Check size={15} />}
+            </span>
+            <p className="toast-copy">{toast.message}</p>
+            <button type="button" className="toast-dismiss" onClick={() => dismissToast(toast.id)} aria-label="Dismiss notification">
+              <X size={14} />
+            </button>
+          </div>
+        ))}
+      </div>
 
       {playlistDialog && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !libraryBusy) { setPlaylistDialog(null); setLibraryError(""); } }}>
         <section className="modal-card playlist-dialog" role="dialog" aria-modal="true" aria-labelledby="playlist-dialog-heading">

@@ -127,8 +127,8 @@ export default function AlbumPage() {
   return (
     <main className="album-page">
       <header className="album-page-header">
-        <a className="album-back-link" href="/"><ArrowLeft size={15} /> Back to Wiloplay</a>
-        <a className="album-brand" href="/"><span><AudioLines size={17} /></span>wiloplay<span className="brand-dot">.</span></a>
+        <a className="album-back-link" href="/app"><ArrowLeft size={15} /> Back to Wiloplay</a>
+        <a className="album-brand" href="/app"><span><AudioLines size={17} /></span>wiloplay<span className="brand-dot">.</span></a>
       </header>
       {loading ? <div className="album-state"><AudioLines size={22} /><span>Opening the album…</span></div>
         : error && !album ? <div className="album-state album-error"><Disc3 size={28} /><h1>This album is taking a moment.</h1><p>{error}</p><button onClick={() => { setLoading(true); setError(""); loadAlbum(albumId).then(setAlbum).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "This album could not be loaded.")).finally(() => setLoading(false)); }}><RefreshCw size={14} /> Try again</button></div>
@@ -149,7 +149,7 @@ export default function AlbumPage() {
                 </article>;
               })}
             </section>
-            <footer className="album-page-footer"><span>Full-length music, shared by the artists who made it.</span><a href="/">Discover more on Wiloplay <ArrowRight size={14} /></a></footer>
+            <footer className="album-page-footer"><span>Full-length music, shared by the artists who made it.</span><a href="/app">Discover more on Wiloplay <ArrowRight size={14} /></a></footer>
           </> : null}
       <audio ref={audioRef} onTimeUpdate={(event) => setElapsed(event.currentTarget.currentTime)} onDurationChange={(event) => { if (Number.isFinite(event.currentTarget.duration)) setDuration(event.currentTarget.duration); }} onEnded={() => { setElapsed(0); if (album && album.tracks.findIndex((track) => track.id === activeTrackId) < album.tracks.length - 1) moveTrack(1); else setPlaying(false); }} onError={() => { if (playing) { setPlaying(false); setError("This track could not be played. Try another track."); } }} />
       {activeTrack && <div className="album-mini-player" aria-label="Album player">

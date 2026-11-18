@@ -1,6 +1,12 @@
-const CACHE_NAME = "wiloplay-shell-v1";
+const CACHE_NAME = "wiloplay-shell-v3";
+const isLocalDevelopment =
+  self.location.hostname === "localhost" ||
+  self.location.hostname === "127.0.0.1" ||
+  self.location.hostname === "::1" ||
+  self.location.hostname.endsWith(".localhost");
 const OFFLINE_URL = "/offline.html";
 const PRECACHE_URLS = [
+  "/app",
   OFFLINE_URL,
   "/icon.svg",
   "/pwa-192.png",
@@ -18,6 +24,11 @@ async function cacheResponse(request, response) {
 }
 
 self.addEventListener("install", (event) => {
+  if (isLocalDevelopment) {
+    event.waitUntil(self.skipWaiting());
+    return;
+  }
+
   event.waitUntil(
     caches
       .open(CACHE_NAME)
@@ -36,7 +47,7 @@ self.addEventListener("activate", (event) => {
             .filter(
               (cacheName) =>
                 cacheName.startsWith("wiloplay-shell-") &&
-                cacheName !== CACHE_NAME,
+                (isLocalDevelopment || cacheName !== CACHE_NAME),
             )
             .map((cacheName) => caches.delete(cacheName)),
         ),
@@ -46,6 +57,8 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("fetch", (event) => {
+  if (isLocalDevelopment) return;
+
   const request = event.request;
   if (request.method !== "GET") return;
 
@@ -62,7 +75,11 @@ self.addEventListener("fetch", (event) => {
         } catch {
           return (
             (await caches.match(request)) ||
-            (await caches.match("/")) ||
+            (url.pathname === "/app"
+              ? await caches.match("/app", { ignoreSearch: true })
+              : url.pathname === "/"
+                ? await caches.match("/", { ignoreSearch: true })
+                : null) ||
             (await caches.match(OFFLINE_URL)) ||
             Response.error()
           );

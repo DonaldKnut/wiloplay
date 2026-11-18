@@ -16,7 +16,7 @@ Requirements: Node.js 20.9 or later and npm.
    npm run dev
    ```
 
-4. Open [http://localhost:3000](http://localhost:3000). The API runs on [http://localhost:4000](http://localhost:4000).
+4. Open [http://localhost:3000](http://localhost:3000) for the marketing homepage, then choose **Open the app** to listen at `/app`. The API runs on [http://localhost:4000](http://localhost:4000).
 
 Artist audio files are stored under `apps/api/uploads/`; use durable object storage and HTTPS for production.
 The database provider is now PostgreSQL. Existing records in the previous local SQLite `apps/api/prisma/dev.db` are not copied automatically; back up and migrate that data before switching an existing installation.
@@ -37,7 +37,9 @@ The database provider is now PostgreSQL. Existing records in the previous local 
 - Collect ticket payments through order-specific Paystack virtual accounts, verify signed webhooks against Paystack's transaction API, and issue one-time QR tickets only after the exact NGN amount is confirmed.
 - View and download ticket QR codes, check in attendees from the artist dashboard, and email updates to paid ticket holders.
 - See a live countdown to each show. Past shows and their tickets leave the active lists at showtime; ticket and payment records are retained.
-- Responsive discovery home, mood search, and a persistent audio player.
+- A dedicated marketing homepage with music-led motion and FAQs, plus the full listening app at `/app`.
+- A collapsible search bar, lyrics search from the player, provider-aware liked songs, and a refined mini-player with mute and volume controls.
+- Installable PWA with cached app shell and offline fallback; catalog data and music streaming still need a network connection.
 
 Event prices are entered and displayed in Nigerian naira; amounts are stored and sent to Paystack in kobo. Each order includes the existing 10% Wiloplay fee in its exact transfer amount. Email verification and password-reset codes expire after 10 minutes, can be resent after one minute, and allow five attempts. New passwords require at least eight characters with a letter and a number. Separately, artist payout approval is restricted to emails in `ADMIN_EMAILS`; call `POST /payments/artists/:artistId/verify` as an allowlisted administrator. Email verification codes, ticket QR emails, and event updates require valid SMTP settings; tickets remain accessible in the user's account if email delivery fails. Paystack, SMTP, OpenAI, and Auphonic may charge for use. Keep provider keys server-side in `apps/api/.env`. Optional `JAMENDO_CLIENT_ID` unlocks Jamendo CC full streams in `/catalog`. Audius, Deezer, and iTunes Search require no API key for the endpoints Wiloplay uses. Preview and stream availability are governed by each provider's terms; respect Jamendo Creative Commons attribution when shown.
 

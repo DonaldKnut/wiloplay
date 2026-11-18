@@ -107,7 +107,7 @@ export default function ArtistProfilePage() {
           <span className="brand-mark"><Headphones size={19} /></span>
           <span>wiloplay<span className="brand-dot">.</span></span>
         </a>
-        <a href="/" className="artist-profile-back"><ArrowLeft size={15} /> Back to music</a>
+        <a href="/app" className="artist-profile-back"><ArrowLeft size={15} /> Back to music</a>
       </header>
 
       <div className="artist-profile-content">
@@ -161,7 +161,7 @@ export default function ArtistProfilePage() {
                 <div className="artist-profile-cover" style={track.coverUrl ? { backgroundImage: `url("${API}${track.coverUrl}")` } : undefined} aria-hidden="true"><Headphones size={18} /></div>
                 <div className="artist-profile-track-info"><strong>{track.title}</strong><span>{track.genre} · {track.artistName}</span></div>
                 <strong className="artist-track-listens">{track.listens.toLocaleString()} <small>listens</small></strong>
-                <a className="artist-track-link" href={`/?track=${encodeURIComponent(track.id)}`} aria-label={`Listen to ${track.title}`}><ArrowUpRight size={17} /></a>
+                <a className="artist-track-link" href={`/app?track=${encodeURIComponent(track.id)}`} aria-label={`Listen to ${track.title}`}><ArrowUpRight size={17} /></a>
               </article>)}
             </div> : <p className="artist-profile-empty">Your releases will appear here after you upload your first track.</p>}
           </section>

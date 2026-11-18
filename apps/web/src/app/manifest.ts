@@ -2,12 +2,12 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    id: "/",
+    id: "/app",
     name: "Wiloplay — music finds its people",
     short_name: "Wiloplay",
     description:
       "Discover music, support artists, and find your people at a live show.",
-    start_url: "/",
+    start_url: "/app",
     scope: "/",
     display: "standalone",
     background_color: "#080c09",
