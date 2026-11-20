@@ -39,8 +39,9 @@ function mediaUrl(path: string | null) {
 }
 
 function formatTime(seconds?: number | null) {
-  if (!seconds) return "—:—";
-  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+  if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return "—:—";
+  const total = Math.floor(seconds);
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
 }
 
 async function loadAlbum(id: string) {

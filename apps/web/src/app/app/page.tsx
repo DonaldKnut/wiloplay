@@ -6,10 +6,8 @@ import {
   ArrowRight,
   AudioLines,
   BadgeCheck,
-  BarChart3,
   BellRing,
   Check,
-  LayoutDashboard,
   ChevronDown,
   Compass,
   CreditCard,
@@ -23,11 +21,9 @@ import {
   Home,
   ImagePlus,
   Info,
-  KeyRound,
   LogOut,
   Link2,
   ListMusic,
-  Mail,
   Maximize2,
   MapPin,
   Menu,
@@ -59,12 +55,23 @@ import {
   X,
 } from "lucide-react";
 import {
+  MUSIC_GENRES,
+  addCapacitySchema,
+  checkInSchema,
+  citySchema,
+  createEventSchema,
+  eventNotificationSchema,
   forgotPasswordSchema,
   loginSchema,
+  playlistAddSchema,
+  playlistCreateSchema,
+  purchaseTicketsSchema,
   resetPasswordSchema,
   searchSchema,
   settingsSchema,
   signupSchema,
+  updateTrackSchema,
+  uploadReleaseSchema,
   verifyEmailSchema,
   zodErrorMessage,
 } from "../auth-schemas";
@@ -315,6 +322,15 @@ type SearchArtistHit = {
   coverUrl: string | null;
   artistName: string;
 };
+type ArtistSpotlight = {
+  id: string;
+  name: string;
+  followers: number;
+  totalListens: number;
+  monthlyListens: number;
+  tracks: { id: string; listens: number }[];
+  topCities: { city: string; listens: number }[];
+};
 type SearchEventHit = {
   id: string;
   title: string;
@@ -403,22 +419,7 @@ const heroSlides = [
   },
 ];
 
-const musicGenres = [
-  "Afrobeats",
-  "Amapiano",
-  "Afropop",
-  "Afro-fusion",
-  "Gospel",
-  "Hip-hop",
-  "R&B",
-  "Pop",
-  "Dancehall",
-  "Highlife",
-  "Jazz",
-  "Alternative",
-  "Electronic",
-  "Other",
-];
+const musicGenres = MUSIC_GENRES;
 
 class ApiRequestError extends Error {
   constructor(message: string, readonly status: number) {
@@ -471,9 +472,10 @@ function authErrorMessage(reason: unknown, fallback: string) {
   return reason instanceof Error ? reason.message : fallback;
 }
 
-function formatTime(seconds?: number) {
-  if (!seconds) return "—:—";
-  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+function formatTime(seconds?: number | null) {
+  if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return "—:—";
+  const total = Math.floor(seconds);
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
 }
 
 function lyricsSearchUrl(track: Pick<Track, "title" | "artist">) {
@@ -706,6 +708,7 @@ export default function HomePage() {
   const [artistBankAccount, setArtistBankAccount] = useState<ArtistBankAccount | null>(null);
   const [artistVerified, setArtistVerified] = useState(false);
   const [artistTracks, setArtistTracks] = useState<Track[]>([]);
+  const [artistSpotlight, setArtistSpotlight] = useState<ArtistSpotlight | null>(null);
   const [aiConfiguration, setAiConfiguration] = useState<AiConfiguration | null>(null);
   const [trackSuggestions, setTrackSuggestions] = useState<Record<string, ReleaseSuggestions>>({});
   const [uploadReleaseType, setUploadReleaseType] = useState<"SINGLE" | "ALBUM">("SINGLE");
@@ -761,7 +764,7 @@ export default function HomePage() {
   const [listenCity, setListenCity] = useState("");
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
-  const [searchMinimized, setSearchMinimized] = useState(false);
+  const [searchMinimized, setSearchMinimized] = useState(true);
   const [activeNav, setActiveNav] = useState<
     "home" | "discovery" | "for-you" | "shows" | "my-tickets"
   >("home");
@@ -770,6 +773,7 @@ export default function HomePage() {
   const [heroAutoplayPaused, setHeroAutoplayPaused] = useState(false);
   const [heroHovered, setHeroHovered] = useState(false);
   const [heroFocused, setHeroFocused] = useState(false);
+  const [moodSlideIndex, setMoodSlideIndex] = useState(0);
   const [playerExpanded, setPlayerExpanded] = useState(false);
   const [modal, setModal] = useState<Modal>(null);
   const [authMode, setAuthMode] = useState<"login" | "signup">("signup");
@@ -779,10 +783,8 @@ export default function HomePage() {
   const [verificationEmail, setVerificationEmail] = useState("");
   const [verificationCode, setVerificationCode] = useState("");
   const [verificationPassword, setVerificationPassword] = useState("");
-  const verificationOtpRefs = useRef<Array<HTMLInputElement | null>>([]);
   const [resetCode, setResetCode] = useState("");
   const [resetPasswordDraft, setResetPasswordDraft] = useState("");
-  const resetOtpRefs = useRef<Array<HTMLInputElement | null>>([]);
   const [resetExpiresInSeconds, setResetExpiresInSeconds] = useState(600);
   const [verificationExpiresInSeconds, setVerificationExpiresInSeconds] = useState(0);
   const [user, setUser] = useState<User | null>(null);
@@ -798,6 +800,8 @@ export default function HomePage() {
   const audioRef = useRef<HTMLAudioElement>(null);
   const lastAudibleVolumeRef = useRef(0.75);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const moodSliderRef = useRef<HTMLDivElement>(null);
+  const genreSliderRef = useRef<HTMLDivElement>(null);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const artistDetailsRequestId = useRef(0);
   const countedListenTrackId = useRef<string | null>(null);
@@ -944,6 +948,19 @@ export default function HomePage() {
     }
   }, [token, user?.name, user?.role]);
 
+  const loadArtistSpotlight = useCallback(async () => {
+    if (!user || user.role !== "ARTIST") {
+      setArtistSpotlight(null);
+      return;
+    }
+    try {
+      const profile = await request<ArtistSpotlight>(`/artists/${encodeURIComponent(user.id)}`, token ?? undefined);
+      setArtistSpotlight(profile);
+    } catch {
+      setArtistSpotlight(null);
+    }
+  }, [token, user]);
+
   const loadUploads = useCallback(async () => {
     try {
       const saved = await request<
@@ -1028,7 +1045,7 @@ export default function HomePage() {
     }
   }, []);
 
-  const searchTracks = useCallback(async (term: string) => {
+  const searchTracks = useCallback(async (term: string, options?: { openPanel?: boolean }) => {
     setSearchError("");
     setSearchFilter("all");
     setActiveCatalogGenre(null);
@@ -1040,7 +1057,10 @@ export default function HomePage() {
       return;
     }
     setSearchLoading(true);
-    setSearchOpen(true);
+    if (options?.openPanel !== false) {
+      setSearchMinimized(false);
+      setSearchOpen(true);
+    }
     try {
       const results = await request<SearchResponse>(`/search?q=${encodeURIComponent(term.trim())}`);
       const catalogTracks = results.catalogTracks ?? [];
@@ -1155,7 +1175,7 @@ export default function HomePage() {
     }
     loadEvents();
     loadUploads();
-    void searchTracks("indie chill");
+    void searchTracks("indie chill", { openPanel: false });
     void loadChart();
     void loadCatalogGenres();
     void loadCatalogTrending();
@@ -1187,11 +1207,14 @@ export default function HomePage() {
       void loadArtistEvents();
       void loadArtistBankAccount();
       void loadArtistTracks();
+      void loadArtistSpotlight();
       void request<AiConfiguration>("/tracks/ai/config", token).then(setAiConfiguration).catch((reason: unknown) => {
         setError(reason instanceof Error ? reason.message : "AI tools could not be checked.");
       });
+    } else {
+      setArtistSpotlight(null);
     }
-  }, [loadArtistBankAccount, loadArtistEvents, loadArtistTracks, loadListenerLibrary, loadMyTicketOrders, token, user]);
+  }, [loadArtistBankAccount, loadArtistEvents, loadArtistSpotlight, loadArtistTracks, loadListenerLibrary, loadMyTicketOrders, token, user]);
 
   useEffect(() => {
     const starts = [
@@ -1350,6 +1373,8 @@ export default function HomePage() {
     }
     setSearchError("");
     setQuery(parsed.data.query);
+    setSearchMinimized(false);
+    setSearchOpen(Boolean(parsed.data.query.trim()));
     if (searchTimer.current) clearTimeout(searchTimer.current);
     searchTimer.current = setTimeout(() => void searchTracks(parsed.data.query), 350);
   }
@@ -1376,14 +1401,9 @@ export default function HomePage() {
         setPlayerExpanded(false);
         return;
       }
-      if (searchOpen) {
+      if (searchOpen || !searchMinimized) {
         event.preventDefault();
-        closeSearchPanel();
-        return;
-      }
-      if (!searchMinimized) {
-        event.preventDefault();
-        setSearchMinimized(true);
+        collapseSearch();
         return;
       }
       if (mobileNav) {
@@ -1415,6 +1435,39 @@ export default function HomePage() {
   function showMessage(message: string) {
     setNotice(message);
     window.setTimeout(() => setNotice(""), 3800);
+  }
+
+  function scrollMoodSlider(direction: -1 | 1) {
+    const track = moodSliderRef.current;
+    if (!track) return;
+    const card = track.querySelector<HTMLElement>(".mood-card");
+    const step = card ? card.offsetWidth + 14 : track.clientWidth * 0.78;
+    track.scrollBy({ left: direction * step, behavior: "smooth" });
+  }
+
+  function scrollGenreSlider(direction: -1 | 1) {
+    const track = genreSliderRef.current;
+    if (!track) return;
+    track.scrollBy({ left: direction * Math.max(160, track.clientWidth * 0.55), behavior: "smooth" });
+  }
+
+  function syncMoodSlideIndex() {
+    const track = moodSliderRef.current;
+    if (!track) return;
+    const cards = [...track.querySelectorAll<HTMLElement>(".mood-card")];
+    if (!cards.length) return;
+    const midpoint = track.scrollLeft + track.clientWidth / 2;
+    let closest = 0;
+    let closestDistance = Number.POSITIVE_INFINITY;
+    cards.forEach((card, index) => {
+      const center = card.offsetLeft + card.offsetWidth / 2;
+      const distance = Math.abs(center - midpoint);
+      if (distance < closestDistance) {
+        closest = index;
+        closestDistance = distance;
+      }
+    });
+    setMoodSlideIndex((current) => (current === closest ? current : closest));
   }
 
   function recordPlaybackHistory() {
@@ -1519,25 +1572,50 @@ export default function HomePage() {
   async function submitPlaylistDialog(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!token || !playlistDialog || libraryBusy) return;
+    if (playlistDialog.mode === "create") {
+      const parsed = playlistCreateSchema.safeParse({
+        name: playlistNameDraft,
+        description: playlistDescriptionDraft,
+      });
+      if (!parsed.success) {
+        const message = zodErrorMessage(parsed.error);
+        setLibraryError(message);
+        showMessage(message);
+        return;
+      }
+    } else {
+      const parsed = playlistAddSchema.safeParse({ playlistId: playlistChoiceId });
+      if (!parsed.success) {
+        const message = zodErrorMessage(parsed.error);
+        setLibraryError(message);
+        showMessage(message);
+        return;
+      }
+    }
     setLibraryBusy(true);
     setLibraryError("");
     try {
       let destinationPlaylistId: string | null = null;
       if (playlistDialog.mode === "create") {
+        const parsed = playlistCreateSchema.parse({
+          name: playlistNameDraft,
+          description: playlistDescriptionDraft,
+        });
         const created = await request<Playlist>("/playlists", token, {
           method: "POST",
           body: JSON.stringify({
-            name: playlistNameDraft,
-            description: playlistDescriptionDraft || undefined,
+            name: parsed.name,
+            description: parsed.description || undefined,
           }),
         });
         setPlaylists((old) => [created, ...old]);
         destinationPlaylistId = created.id;
         if (playlistDialog.track) await addTrackToPlaylist(created.id, playlistDialog.track);
         else showMessage("Your playlist is ready.");
-      } else if (playlistDialog.track && playlistChoiceId) {
-        await addTrackToPlaylist(playlistChoiceId, playlistDialog.track);
-        destinationPlaylistId = playlistChoiceId;
+      } else if (playlistDialog.track) {
+        const parsed = playlistAddSchema.parse({ playlistId: playlistChoiceId });
+        await addTrackToPlaylist(parsed.playlistId, playlistDialog.track);
+        destinationPlaylistId = parsed.playlistId;
       }
       if (destinationPlaylistId) await showPlaylist(destinationPlaylistId);
       setPlaylistDialog(null);
@@ -1585,8 +1663,11 @@ export default function HomePage() {
       );
       await showPlaylist(playlistDetails.id);
       await loadListenerLibrary();
+      showMessage("Removed from this playlist.");
     } catch (reason) {
-      setLibraryError(reason instanceof Error ? reason.message : "The track could not be removed.");
+      const message = reason instanceof Error ? reason.message : "The track could not be removed.";
+      setLibraryError(message);
+      showMessage(message);
     } finally {
       setLibraryBusy(false);
     }
@@ -1651,7 +1732,12 @@ export default function HomePage() {
 
   function saveListenerCity(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const city = cityDraft.trim();
+    const parsed = citySchema.safeParse({ city: cityDraft });
+    if (!parsed.success) {
+      showMessage(zodErrorMessage(parsed.error));
+      return;
+    }
+    const city = parsed.data.city;
     if (!city) {
       localStorage.removeItem("wiloplay-listener-city");
       setListenCity("");
@@ -1709,19 +1795,22 @@ export default function HomePage() {
     setSearchOpen(false);
   }
 
-  function toggleSearch() {
-    if (searchMinimized) {
-      setSearchMinimized(false);
-      requestAnimationFrame(() => document.getElementById("global-search")?.focus());
-      return;
-    }
+  function collapseSearch() {
     setSearchOpen(false);
     setSearchMinimized(true);
   }
 
+  function toggleSearch() {
+    if (searchMinimized) {
+      openSearch();
+      return;
+    }
+    document.getElementById("global-search")?.focus();
+  }
+
   function openSearch() {
     setSearchMinimized(false);
-    setSearchOpen(true);
+    setSearchOpen(Boolean(query.trim()));
     requestAnimationFrame(() => document.getElementById("global-search")?.focus());
   }
 
@@ -1732,18 +1821,6 @@ export default function HomePage() {
       return;
     }
     setVolume(lastAudibleVolumeRef.current || 0.75);
-  }
-
-  function jumpToSection(sectionId: string) {
-    setModal(null);
-    setError("");
-    setFieldErrors({});
-    setMobileNav(false);
-    window.setTimeout(() => {
-      const target = document.getElementById(sectionId)
-        ?? (sectionId === "dashboard" ? document.getElementById("home") : null);
-      target?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 40);
   }
 
   function openSettings() {
@@ -1794,7 +1871,6 @@ export default function HomePage() {
     showMessage(challenge.sent
       ? `A verification code was sent to ${challenge.email}.`
       : `Enter the code already sent to ${challenge.email}, or resend in a minute.`);
-    window.setTimeout(() => focusVerificationOtp(0), 40);
   }
 
   async function handleAuth(event: FormEvent<HTMLFormElement>) {
@@ -1859,22 +1935,7 @@ export default function HomePage() {
     }
   }
 
-  function goToDashboard() {
-    setMobileNav(false);
-    setSearchOpen(false);
-    setActiveNav("home");
-    window.setTimeout(() => {
-      const dashboard = document.getElementById("dashboard");
-      if (dashboard) {
-        dashboard.scrollIntoView({ behavior: "smooth", block: "start" });
-        return;
-      }
-      window.scrollTo({ top: 0, behavior: "smooth" });
-      document.getElementById("home")?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 40);
-  }
-
-  function establishSession(session: AuthSession, message: string, options?: { goToDashboard?: boolean }) {
+  function establishSession(session: AuthSession, message: string) {
     localStorage.setItem("sonora-token", session.accessToken);
     localStorage.setItem("sonora-user", JSON.stringify(session.user));
     setToken(session.accessToken);
@@ -1884,11 +1945,8 @@ export default function HomePage() {
     setVerificationCode("");
     setResetCode("");
     setResetPasswordDraft("");
-    setError("");
-    setFieldErrors({});
     setModal(checkoutEvent ? "checkout" : null);
     showMessage(message);
-    if (options?.goToDashboard && !checkoutEvent) goToDashboard();
   }
 
   async function resendEmailVerification() {
@@ -1956,72 +2014,6 @@ export default function HomePage() {
     }
   }
 
-  function maskEmailAddress(email: string) {
-    const [local = "", domain = ""] = email.split("@");
-    if (!domain) return email;
-    if (local.length <= 2) return `${local[0] ?? ""}••@${domain}`;
-    return `${local.slice(0, 2)}•••${local.slice(-1)}@${domain}`;
-  }
-
-  function focusVerificationOtp(index: number) {
-    verificationOtpRefs.current[Math.max(0, Math.min(5, index))]?.focus();
-  }
-
-  function setVerificationOtpValue(next: string) {
-    const digits = next.replace(/\D/g, "").slice(0, 6);
-    setVerificationCode(digits);
-    focusVerificationOtp(Math.min(digits.length, 5));
-  }
-
-  function updateVerificationOtpDigit(index: number, raw: string) {
-    const incoming = raw.replace(/\D/g, "");
-    if (incoming.length > 1) {
-      setVerificationOtpValue(incoming);
-      return;
-    }
-    const digits = Array.from({ length: 6 }, (_, slot) => verificationCode[slot] ?? "");
-    digits[index] = incoming.slice(-1);
-    const next = digits.join("").replace(/\s/g, "");
-    setVerificationCode(next);
-    if (incoming) focusVerificationOtp(index + 1);
-  }
-
-  function handleVerificationOtpKeyDown(index: number, key: string) {
-    if (key === "Backspace" && !verificationCode[index]) {
-      focusVerificationOtp(index - 1);
-    }
-    if (key === "ArrowLeft") focusVerificationOtp(index - 1);
-    if (key === "ArrowRight") focusVerificationOtp(index + 1);
-  }
-
-  function focusResetOtp(index: number) {
-    resetOtpRefs.current[Math.max(0, Math.min(5, index))]?.focus();
-  }
-
-  function setResetOtpValue(next: string) {
-    const digits = next.replace(/\D/g, "").slice(0, 6);
-    setResetCode(digits);
-    focusResetOtp(Math.min(digits.length, 5));
-  }
-
-  function updateResetOtpDigit(index: number, raw: string) {
-    const incoming = raw.replace(/\D/g, "");
-    if (incoming.length > 1) {
-      setResetOtpValue(incoming);
-      return;
-    }
-    const digits = Array.from({ length: 6 }, (_, slot) => resetCode[slot] ?? "");
-    digits[index] = incoming.slice(-1);
-    setResetCode(digits.join("").replace(/\s/g, ""));
-    if (incoming) focusResetOtp(index + 1);
-  }
-
-  function handleResetOtpKeyDown(index: number, key: string) {
-    if (key === "Backspace" && !resetCode[index]) focusResetOtp(index - 1);
-    if (key === "ArrowLeft") focusResetOtp(index - 1);
-    if (key === "ArrowRight") focusResetOtp(index + 1);
-  }
-
   async function verifyEmail(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
@@ -2039,11 +2031,7 @@ export default function HomePage() {
         null,
         { method: "POST", body: JSON.stringify(parsed.data) },
       );
-      establishSession(
-        result,
-        "You're verified successfully. Welcome to your dashboard.",
-        { goToDashboard: true },
-      );
+      establishSession(result, "Your email is verified. Welcome to Wiloplay.");
     } catch (reason) {
       setError(authErrorMessage(reason, "Could not verify your email."));
     } finally {
@@ -2075,7 +2063,6 @@ export default function HomePage() {
       setResetPasswordDraft("");
       setModal("reset-password");
       showMessage(result.message);
-      window.setTimeout(() => focusResetOtp(0), 40);
     } catch (reason) {
       setError(authErrorMessage(reason, "Could not start password reset."));
     } finally {
@@ -2211,8 +2198,46 @@ export default function HomePage() {
     setModal("event");
   }
 
+  async function openCreateTickets() {
+    if (!user) {
+      setAuthMode("signup");
+      setModal("signup");
+      return;
+    }
+    if (user.role === "ARTIST") {
+      openEventWizard();
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const result = await request<AuthSession>(
+        "/auth/become-artist",
+        token,
+        { method: "POST" },
+      );
+      establishSession(result, "Your artist profile is ready. Let's put on a show.");
+      openEventWizard();
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : "Could not update your account.";
+      setError(message);
+      showMessage(message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function advanceUploadStep() {
-    if (uploadStep === 0 && !uploadFormRef.current?.reportValidity()) return;
+    if (uploadStep === 0) {
+      const parsed = uploadReleaseSchema.safeParse({
+        ...uploadDraft,
+        releaseType: uploadReleaseType,
+      });
+      if (!parsed.success) {
+        setError(zodErrorMessage(parsed.error));
+        return;
+      }
+    }
     if (uploadStep === 1 && (!uploadFiles.length || !uploadCoverFile)) {
       setError("Choose at least one audio file and add cover artwork to continue.");
       return;
@@ -2222,7 +2247,22 @@ export default function HomePage() {
   }
 
   function advanceEventStep() {
-    if (!eventFormRef.current?.reportValidity()) return;
+    if (eventStep === 0) {
+      const parsed = createEventSchema.pick({ title: true, venue: true, city: true, startsAt: true }).safeParse(eventDraft);
+      if (!parsed.success) {
+        setError(zodErrorMessage(parsed.error));
+        return;
+      }
+    }
+    if (eventStep === 1) {
+      const parsed = createEventSchema.pick({ ticketCategories: true }).safeParse({
+        ticketCategories: ticketCategoryDrafts,
+      });
+      if (!parsed.success) {
+        setError(zodErrorMessage(parsed.error));
+        return;
+      }
+    }
     setError("");
     setEventStep((step) => Math.min(step + 1, 2));
   }
@@ -2230,6 +2270,15 @@ export default function HomePage() {
   async function uploadTrack(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (uploadStep !== 2) return;
+    const parsed = uploadReleaseSchema.safeParse({
+      ...uploadDraft,
+      releaseType: uploadReleaseType,
+    });
+    if (!parsed.success) {
+      setUploadStep(0);
+      setError(zodErrorMessage(parsed.error));
+      return;
+    }
     if (!uploadFiles.length || !uploadCoverFile) {
       setUploadStep(1);
       setError("Add your audio and cover artwork before publishing.");
@@ -2238,14 +2287,14 @@ export default function HomePage() {
     setBusy(true);
     setError("");
     const data = new FormData();
-    data.set("artistName", uploadDraft.artistName.trim());
-    data.set("releaseType", uploadReleaseType);
-    data.set("genre", uploadDraft.genre);
-    data.set("releaseDescription", uploadDraft.releaseDescription.trim());
-    if (uploadReleaseType === "SINGLE") {
-      data.set("title", uploadDraft.title.trim());
+    data.set("artistName", parsed.data.artistName);
+    data.set("releaseType", parsed.data.releaseType);
+    data.set("genre", parsed.data.genre);
+    data.set("releaseDescription", parsed.data.releaseDescription?.trim() ?? "");
+    if (parsed.data.releaseType === "SINGLE") {
+      data.set("title", parsed.data.title?.trim() ?? "");
     } else {
-      data.set("albumTitle", uploadDraft.albumTitle.trim());
+      data.set("albumTitle", parsed.data.albumTitle?.trim() ?? "");
     }
     uploadFiles.forEach((file) => data.append("files", file));
     data.set("cover", uploadCoverFile);
@@ -2272,6 +2321,7 @@ export default function HomePage() {
       setUploadFiles([]);
       setUploadCoverFile(null);
       setModal(null);
+      void loadArtistSpotlight();
       showMessage(created[0]?.releaseType === "ALBUM" ? "Your album is out in the world." : "Your single is out in the world.");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Upload failed.");
@@ -2293,6 +2343,7 @@ export default function HomePage() {
         ? `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}`
         : `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`;
     window.open(shareUrl, "_blank", "noopener,noreferrer");
+    showMessage(`Opening ${platform} to share “${track.title}”.`);
   }
 
   async function shareEvent(event: EventItem, platform: "TikTok" | "WhatsApp" | "Instagram" | "X") {
@@ -2335,9 +2386,19 @@ export default function HomePage() {
   async function updateArtistTrack(event: FormEvent<HTMLFormElement>, track: Track) {
     event.preventDefault();
     if (!token) return;
+    const values = new FormData(event.currentTarget);
+    const parsed = updateTrackSchema.safeParse({
+      title: values.get("title"),
+      genre: values.get("genre"),
+      albumTitle: values.get("albumTitle") ?? "",
+      releaseDescription: values.get("releaseDescription") ?? "",
+    });
+    if (!parsed.success) {
+      setError(zodErrorMessage(parsed.error));
+      return;
+    }
     setBusy(true);
     setError("");
-    const values = new FormData(event.currentTarget);
     try {
       const updated = await request<Track & { artistName: string; coverUrl?: string | null }>(
         `/tracks/${track.id}`,
@@ -2345,10 +2406,10 @@ export default function HomePage() {
         {
           method: "PATCH",
           body: JSON.stringify({
-            title: values.get("title"),
-            genre: values.get("genre"),
-            ...(values.has("albumTitle") && { albumTitle: values.get("albumTitle") }),
-            releaseDescription: values.get("releaseDescription"),
+            title: parsed.data.title,
+            genre: parsed.data.genre,
+            ...(values.has("albumTitle") && { albumTitle: parsed.data.albumTitle || undefined }),
+            releaseDescription: parsed.data.releaseDescription || undefined,
           }),
         },
       );
@@ -2395,6 +2456,15 @@ export default function HomePage() {
 
   async function applyTrackSuggestions(track: Track, suggestions: ReleaseSuggestions) {
     if (!token) return;
+    const parsed = updateTrackSchema.safeParse({
+      title: suggestions.title,
+      genre: suggestions.genre,
+      releaseDescription: suggestions.releaseDescription ?? "",
+    });
+    if (!parsed.success) {
+      setError(zodErrorMessage(parsed.error));
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -2403,7 +2473,7 @@ export default function HomePage() {
         token,
         {
           method: "PATCH",
-          body: JSON.stringify(suggestions),
+          body: JSON.stringify(parsed.data),
         },
       );
       const update = (item: Track) => item.id === track.id ? {
@@ -2489,6 +2559,7 @@ export default function HomePage() {
         setCurrent(null);
         setPlaying(false);
       }
+      void loadArtistSpotlight();
       showMessage("Track deleted.");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Track could not be deleted.");
@@ -2500,15 +2571,20 @@ export default function HomePage() {
   async function addEventCapacity(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!token || !activeSalesEvent) return;
+    const parsed = addCapacitySchema.safeParse({ additionalTickets });
+    if (!parsed.success) {
+      setError(zodErrorMessage(parsed.error));
+      return;
+    }
     setBusy(true);
     setError("");
     try {
       await request(`/events/${activeSalesEvent.id}/capacity`, token, {
         method: "PATCH",
-        body: JSON.stringify({ additionalTickets }),
+        body: JSON.stringify({ additionalTickets: parsed.data.additionalTickets }),
       });
       await Promise.all([loadArtistEvents(), loadEvents()]);
-      showMessage(`${additionalTickets} more tickets added.`);
+      showMessage(`${parsed.data.additionalTickets} more tickets added.`);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "More tickets could not be added.");
     } finally {
@@ -2519,13 +2595,18 @@ export default function HomePage() {
   async function sendEventNotification(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!token || !activeSalesEvent) return;
+    const parsed = eventNotificationSchema.safeParse({ message: notificationMessage });
+    if (!parsed.success) {
+      setError(zodErrorMessage(parsed.error));
+      return;
+    }
     setBusy(true);
     setError("");
     try {
       const result = await request<{ recipientCount: number; sentCount: number; failedCount: number }>(
         `/events/${activeSalesEvent.id}/notify`,
         token,
-        { method: "POST", body: JSON.stringify({ message: notificationMessage }) },
+        { method: "POST", body: JSON.stringify({ message: parsed.data.message }) },
       );
       setNotificationMessage("");
       setNotificationOpen(false);
@@ -2540,18 +2621,26 @@ export default function HomePage() {
   async function createEvent(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (eventStep !== 2) return;
+    const parsed = createEventSchema.safeParse({
+      ...eventDraft,
+      ticketCategories: ticketCategoryDrafts,
+    });
+    if (!parsed.success) {
+      setError(zodErrorMessage(parsed.error));
+      return;
+    }
     setBusy(true);
     setError("");
     const body = new FormData();
-    body.set("title", eventDraft.title.trim());
+    body.set("title", parsed.data.title);
     body.set("artistName", user?.name ?? "");
-    body.set("venue", eventDraft.venue.trim());
-    body.set("city", eventDraft.city.trim());
-    body.set("startsAt", new Date(eventDraft.startsAt).toISOString());
-    const categories = ticketCategoryDrafts.map((category) => ({
-      name: category.name.trim(),
-      priceCents: Math.round(Number(category.price) * 100),
-      capacity: Number(category.capacity),
+    body.set("venue", parsed.data.venue);
+    body.set("city", parsed.data.city);
+    body.set("startsAt", new Date(parsed.data.startsAt).toISOString());
+    const categories = parsed.data.ticketCategories.map((category) => ({
+      name: category.name,
+      priceCents: Math.round(category.price * 100),
+      capacity: category.capacity,
     }));
     body.set("priceCents", String(categories[0]?.priceCents ?? 0));
     body.set("capacity", String(categories.reduce((total, category) => total + category.capacity, 0)));
@@ -2598,6 +2687,14 @@ export default function HomePage() {
   async function purchaseTickets(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!token || !checkoutEvent) return;
+    const parsed = purchaseTicketsSchema.safeParse({
+      quantity: ticketQuantity,
+      categoryId: selectedTicketCategoryId,
+    });
+    if (!parsed.success) {
+      setError(zodErrorMessage(parsed.error));
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -2607,8 +2704,8 @@ export default function HomePage() {
         {
         method: "POST",
         body: JSON.stringify({
-          quantity: ticketQuantity,
-          ...(selectedTicketCategoryId && { categoryId: selectedTicketCategoryId }),
+          quantity: parsed.data.quantity,
+          ...(parsed.data.categoryId && { categoryId: parsed.data.categoryId }),
         }),
         },
       );
@@ -2624,7 +2721,12 @@ export default function HomePage() {
 
   async function checkInTicket(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!token || !selectedSalesEventId || !ticketCode.trim()) return;
+    if (!token || !selectedSalesEventId) return;
+    const parsed = checkInSchema.safeParse({ code: ticketCode });
+    if (!parsed.success) {
+      setCheckInError(zodErrorMessage(parsed.error));
+      return;
+    }
     setBusy(true);
     setCheckInError("");
     setCheckInMessage("");
@@ -2632,7 +2734,7 @@ export default function HomePage() {
       const result = await request<{ attendee: string; event: string }>(
         `/events/${selectedSalesEventId}/check-in`,
         token,
-        { method: "POST", body: JSON.stringify({ code: ticketCode.trim() }) },
+        { method: "POST", body: JSON.stringify({ code: parsed.data.code }) },
       );
       setTicketCode("");
       setCheckInMessage(`${result.attendee} checked in for ${result.event}.`);
@@ -2748,21 +2850,16 @@ export default function HomePage() {
   const activeTicketOrders = myTicketOrders.filter(
     (order) => new Date(order.event.startsAt).getTime() > now,
   );
-  const artistDashboardStats = useMemo(() => {
-    if (user?.role !== "ARTIST") return null;
-    return {
-      events: artistEvents.length,
-      releases: artistTracks.length,
-      paidTickets: artistEvents.reduce((sum, event) => sum + event.paidTickets, 0),
-      pendingTickets: artistEvents.reduce((sum, event) => sum + event.pendingTickets, 0),
-      revenueCents: artistEvents.reduce((sum, event) => sum + event.revenueCents, 0),
-    };
-  }, [artistEvents, artistTracks.length, user?.role]);
   const activeSalesEvent =
     artistEvents.find((item) => item.id === selectedSalesEventId) ?? artistEvents[0];
   const selectedCheckoutCategory = checkoutEvent?.ticketCategories.find(
     (category) => category.id === selectedTicketCategoryId,
   ) ?? checkoutEvent?.ticketCategories[0];
+  const artistUpcomingShows = artistEvents.filter((item) => new Date(item.startsAt).getTime() > now).length;
+  const artistRevenueCents = artistEvents.reduce((sum, item) => sum + item.revenueCents, 0);
+  const artistReleaseCount = artistSpotlight?.tracks.length ?? artistTracks.length;
+  const artistTopCity = artistSpotlight?.topCities[0]?.city ?? null;
+  const isArtistHome = user?.role === "ARTIST";
 
   return (
     <main className="app-shell">
@@ -2780,19 +2877,11 @@ export default function HomePage() {
       >
         <div className="sidebar-aura" aria-hidden="true" />
         <header className="sidebar-header">
-          <a
-            href="#dashboard"
-            className="brand"
-            aria-label="Wiloplay dashboard"
-            onClick={(event) => {
-              event.preventDefault();
-              jumpToSection("dashboard");
-            }}
-          >
+          <a href="#home" className="brand" aria-label="Wiloplay home" onClick={() => setMobileNav(false)}>
             <span className="brand-mark"><AudioLines size={18} strokeWidth={2.25} /></span>
             <span className="brand-copy">
               <strong>wiloplay<span className="brand-dot">.</span></strong>
-              <small>Dashboard</small>
+              <small>Listen in</small>
             </span>
           </a>
           <button className="sidebar-close" type="button" aria-label="Close menu" onClick={() => setMobileNav(false)}>
@@ -2815,21 +2904,9 @@ export default function HomePage() {
           <section className="sidebar-section">
             <p className="nav-caption">Explore</p>
             <nav className="side-nav" aria-label="Main navigation">
-              <a
-                className={`nav-link ${activeNav === "home" ? "active" : ""}`}
-                aria-current={activeNav === "home" ? "location" : undefined}
-                href="#dashboard"
-                onClick={(event) => {
-                  event.preventDefault();
-                  jumpToSection("dashboard");
-                }}
-              >
-                <span className="nav-ico"><LayoutDashboard size={16} /></span>
-                <span className="nav-label">Dashboard</span>
-              </a>
-              <a className="nav-link" href="/" onClick={() => setMobileNav(false)}>
+              <a className={`nav-link ${activeNav === "home" ? "active" : ""}`} aria-current={activeNav === "home" ? "location" : undefined} href="#home" onClick={() => setMobileNav(false)}>
                 <span className="nav-ico"><Home size={16} /></span>
-                <span className="nav-label">Homepage</span>
+                <span className="nav-label">Home</span>
               </a>
               <a
                 className={`nav-link ${activeNav === "discovery" ? "active" : ""}`}
@@ -2901,34 +2978,6 @@ export default function HomePage() {
             </div>
           </section>
 
-          {user?.role === "ARTIST" && (
-            <section className="sidebar-section">
-              <p className="nav-caption">Artist studio</p>
-              <div className="sidebar-stack">
-                <button type="button" className="library-link" onClick={() => jumpToSection("dashboard")}>
-                  <span className="nav-ico"><LayoutDashboard size={15} /></span>
-                  <span>Studio overview</span>
-                </button>
-                <button type="button" className="library-link" onClick={() => jumpToSection("ticket-sales")}>
-                  <span className="nav-ico"><BarChart3 size={15} /></span>
-                  <span>Ticket sales</span>
-                </button>
-                <button type="button" className="library-link" onClick={() => { setMobileNav(false); openEventWizard(); }}>
-                  <span className="nav-ico"><CalendarDays size={15} /></span>
-                  <span>Sell tickets</span>
-                </button>
-                <button type="button" className="library-link" onClick={() => { setMobileNav(false); openUploadWizard(); }}>
-                  <span className="nav-ico"><Upload size={15} /></span>
-                  <span>Upload music</span>
-                </button>
-                <button type="button" className="library-link" onClick={() => jumpToSection("artist-music")}>
-                  <span className="nav-ico"><Disc3 size={15} /></span>
-                  <span>Manage releases</span>
-                </button>
-              </div>
-            </section>
-          )}
-
           <section className="sidebar-section">
             <p className="nav-caption">Account</p>
             <div className="sidebar-stack">
@@ -2936,12 +2985,6 @@ export default function HomePage() {
                 <span className="nav-ico"><UserRound size={15} /></span>
                 <span>{user ? "My profile" : "Sign in"}</span>
               </button>
-              {user && user.role !== "ARTIST" && (
-                <button type="button" className="library-link" onClick={() => jumpToSection("dashboard")}>
-                  <span className="nav-ico"><LayoutDashboard size={15} /></span>
-                  <span>My dashboard</span>
-                </button>
-              )}
               <button type="button" className="library-link" onClick={openSettings}>
                 <span className="nav-ico"><Settings size={15} /></span>
                 <span>Settings</span>
@@ -2985,38 +3028,24 @@ export default function HomePage() {
       </aside>
 
       <section className="main-panel" id="home">
-        <header className="topbar">
+        {!searchMinimized && <button type="button" className="search-scrim is-visible" aria-label="Close search" onClick={collapseSearch} />}
+        <header className={`topbar${!searchMinimized ? " is-search-focus" : ""}`}>
           <div className="topbar-left">
-            <button className="icon-btn mobile-menu" aria-label="Open menu" onClick={() => setMobileNav(!mobileNav)}><Menu size={19} /></button>
-            <a
-              href="#dashboard"
-              className="topbar-brand"
-              aria-label="Go to dashboard"
-              onClick={(event) => {
-                event.preventDefault();
-                jumpToSection("dashboard");
-              }}
-            >
-              <span className="brand-mark"><AudioLines size={16} strokeWidth={2.25} /></span>
-              <span>wiloplay<span className="brand-dot">.</span></span>
-            </a>
-            <a href="/" className="topbar-home-link" aria-label="Open Wiloplay homepage">
-              <Home size={14} />
-              <span>Homepage</span>
-            </a>
-            <button className="icon-btn top-arrow" aria-label="Go back" onClick={() => window.history.back()}><ArrowLeft size={17} /></button>
-            <button className="icon-btn top-arrow" aria-label="Go forward" onClick={() => window.history.forward()}><ArrowRight size={17} /></button>
-            <div className="search-shell">
-              {searchOpen && <button type="button" className="search-scrim" aria-label="Close search" onClick={closeSearchPanel} />}
-              <form className={`search-box${searchOpen ? " search-focused" : ""}${searchMinimized ? " search-minimized" : ""}`} role="search" onSubmit={(event) => { event.preventDefault(); void searchTracks(query); document.getElementById("track-list")?.scrollIntoView({ behavior: "smooth" }); setSearchOpen(true); }}>
-                <button type="button" className="search-toggle" aria-label={searchMinimized ? "Expand search" : "Minimize search"} aria-expanded={!searchMinimized} aria-controls={searchMinimized ? undefined : "global-search"} onClick={toggleSearch}><Search size={16} /></button>
-                {!searchMinimized && <input id="global-search" aria-label="Search songs, artists, albums, and shows" placeholder="Songs, artists, albums, shows..." value={query} onFocus={() => setSearchOpen(true)} onChange={(event) => onSearchChange(event.target.value)} />}
-                {!searchMinimized && (searchLoading ? <span className="search-loading" aria-live="polite">Searching</span> : query ? <button className="search-clear" type="button" aria-label="Clear search" onClick={() => { setQuery(""); void searchTracks(""); closeSearchPanel(); }}><X size={14} /></button> : null)}
+            <button className="icon-btn mobile-menu topbar-chrome" aria-label="Open menu" onClick={() => setMobileNav(!mobileNav)}><Menu size={19} /></button>
+            <button className="icon-btn top-arrow topbar-chrome" aria-label="Go back" onClick={() => window.history.back()}><ArrowLeft size={17} /></button>
+            <button className="icon-btn top-arrow topbar-chrome" aria-label="Go forward" onClick={() => window.history.forward()}><ArrowRight size={17} /></button>
+            <div className={`search-shell${searchMinimized ? " is-minimized" : " is-expanded"}`}>
+              <form className={`search-box${searchOpen || !searchMinimized ? " search-focused" : ""}${searchMinimized ? " search-minimized" : ""}`} role="search" onSubmit={(event) => { event.preventDefault(); void searchTracks(query); document.getElementById("track-list")?.scrollIntoView({ behavior: "smooth" }); setSearchOpen(true); }}>
+                <button type="button" className="search-toggle" aria-label={searchMinimized ? "Open search" : "Focus search"} aria-expanded={!searchMinimized} aria-controls={searchMinimized ? undefined : "global-search"} onClick={toggleSearch}><Search size={16} /></button>
+                {!searchMinimized && <input id="global-search" aria-label="Search songs, artists, albums, and shows" placeholder="Search music..." autoComplete="off" enterKeyHint="search" value={query} onFocus={() => { if (query.trim()) setSearchOpen(true); }} onChange={(event) => onSearchChange(event.target.value)} />}
+                {!searchMinimized && searchLoading && <span className="search-loading" aria-live="polite">Searching</span>}
+                {!searchMinimized && query && !searchLoading && <button className="search-clear" type="button" aria-label="Clear search" onClick={() => { setQuery(""); void searchTracks(""); closeSearchPanel(); }}><X size={14} /></button>}
+                {!searchMinimized && <button className="search-close-btn" type="button" aria-label="Close search" onClick={collapseSearch}><X size={14} /><span>Close</span></button>}
               </form>
-              {searchOpen && (query.trim() || searchResults) && <div className="search-panel" role="listbox" aria-label="Search results">
+              {!searchMinimized && searchOpen && (query.trim() || searchLoading) && <div className="search-panel is-open" role="listbox" aria-label="Search results">
                 <div className="search-panel-head">
                   <strong>Search</strong>
-                  <button type="button" className="search-panel-close" aria-label="Close search" onMouseDown={(event) => event.preventDefault()} onClick={closeSearchPanel}><X size={15} /></button>
+                  <button type="button" className="search-panel-close" aria-label="Close search" onMouseDown={(event) => event.preventDefault()} onClick={collapseSearch}><X size={15} /></button>
                 </div>
                 <div className="search-filter-row">
                   {([
@@ -3036,31 +3065,31 @@ export default function HomePage() {
                 {!searchLoading && !searchError && query.trim() && !searchResults?.totals.all && <p className="search-panel-empty">No matches yet. Try another song, artist, mood, or city.</p>}
                 {!searchLoading && searchResults && (searchFilter === "all" || searchFilter === "wiloplay") && searchResults.tracks.slice(0, 5).map((track) => {
                   const playable = apiTrackToPlayerTrack(track);
-                  return <button type="button" className="search-hit" key={`upload-${track.id}`} onMouseDown={(event) => event.preventDefault()} onClick={() => { toggleTrack(playable); setSearchOpen(false); }}>
+                  return <button type="button" className="search-hit" key={`upload-${track.id}`} onMouseDown={(event) => event.preventDefault()} onClick={() => { toggleTrack(playable); collapseSearch(); }}>
                     <Cover src={playable.cover} alt="" /><span><strong>{track.title}</strong><small>{track.artistName} · Wiloplay{track.genre ? ` · ${track.genre}` : ""}</small></span><Play size={13} />
                   </button>;
                 })}
                 {!searchLoading && (searchFilter === "all" || searchFilter === "catalog") && (searchResults?.catalogTracks ?? []).slice(0, 5).map((track) => {
                   const playable = catalogTrackToPlayerTrack(track);
-                  return <button type="button" className="search-hit" key={`catalog-${track.id}`} onMouseDown={(event) => event.preventDefault()} onClick={() => { toggleTrack(playable); setSearchOpen(false); }}>
+                  return <button type="button" className="search-hit" key={`catalog-${track.id}`} onMouseDown={(event) => event.preventDefault()} onClick={() => { toggleTrack(playable); collapseSearch(); }}>
                     <Cover src={playable.cover} alt="" /><span><strong>{track.title}</strong><small>{track.artist} · {catalogProviderLabel(track.provider)} · {track.playback === "full" ? "Full" : "Preview"}</small></span><Play size={13} />
                   </button>;
                 })}
                 {!searchLoading && searchResults && (searchFilter === "all" || searchFilter === "artists") && searchResults.artists.slice(0, 5).map((artist) => (
-                  <a className="search-hit" key={`artist-${artist.id}`} href={`/artist/${encodeURIComponent(artist.id)}`} onMouseDown={(event) => event.preventDefault()}>
+                  <a className="search-hit" key={`artist-${artist.id}`} href={`/artist/${encodeURIComponent(artist.id)}`} onMouseDown={(event) => event.preventDefault()} onClick={collapseSearch}>
                     <Cover src={artist.coverUrl ? `${API}${artist.coverUrl}` : ""} alt="" /><span><strong>{artist.name}</strong><small>{artist.trackCount} release{artist.trackCount === 1 ? "" : "s"} · {artist.followers} follower{artist.followers === 1 ? "" : "s"}</small></span><Users size={13} />
                   </a>
                 ))}
                 {!searchLoading && searchResults && (searchFilter === "all" || searchFilter === "shows") && searchResults.events.slice(0, 5).map((eventItem) => (
-                  <button type="button" className="search-hit" key={`event-${eventItem.id}`} onMouseDown={(event) => event.preventDefault()} onClick={() => { setSearchOpen(false); document.getElementById(`event-${eventItem.id}`)?.scrollIntoView({ behavior: "smooth" }); }}>
+                  <button type="button" className="search-hit" key={`event-${eventItem.id}`} onMouseDown={(event) => event.preventDefault()} onClick={() => { collapseSearch(); document.getElementById(`event-${eventItem.id}`)?.scrollIntoView({ behavior: "smooth" }); }}>
                     <Cover src={eventItem.coverUrl ? `${API}${eventItem.coverUrl}` : ""} alt="" /><span><strong>{eventItem.title}</strong><small>{eventItem.artistName} · {eventItem.city} · {formatDate(eventItem.startsAt)}</small></span><Ticket size={13} />
                   </button>
                 ))}
-                {query.trim() && <button type="button" className="search-panel-footer" onMouseDown={(event) => event.preventDefault()} onClick={() => { void searchTracks(query); document.getElementById("track-list")?.scrollIntoView({ behavior: "smooth" }); setSearchOpen(false); }}>See full results <ArrowRight size={14} /></button>}
+                {query.trim() && <button type="button" className="search-panel-footer" onMouseDown={(event) => event.preventDefault()} onClick={() => { void searchTracks(query, { openPanel: false }); document.getElementById("track-list")?.scrollIntoView({ behavior: "smooth" }); collapseSearch(); }}>See full results <ArrowRight size={14} /></button>}
               </div>}
             </div>
           </div>
-          <div className="topbar-actions">
+          <div className="topbar-actions topbar-chrome">
             <button className="theme-toggle" type="button" aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`} aria-pressed={theme === "light"} title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`} onClick={toggleTheme}>
               {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
               <span>{theme === "dark" ? "Light mode" : "Dark mode"}</span>
@@ -3074,24 +3103,21 @@ export default function HomePage() {
                     <ChevronDown className="artist-studio-chevron" size={14} />
                   </summary>
                   <div className="artist-studio-dropdown">
-                    <button onClick={(event) => { event.currentTarget.closest("details")?.removeAttribute("open"); jumpToSection("dashboard"); }}>
-                      <LayoutDashboard size={16} /><span><strong>Studio overview</strong><small>Tickets, music, and stats</small></span><ArrowRight size={14} />
-                    </button>
                     <a href={`/artist/${encodeURIComponent(user.id)}`} onClick={(event) => event.currentTarget.closest("details")?.removeAttribute("open")}>
-                      <Users size={16} /><span><strong>Audience analytics</strong><small>Fans, listens, and cities</small></span><ArrowRight size={14} />
+                      <Users size={16} /><span><strong>Profile &amp; audience</strong><small>Fans, listens, and cities</small></span><ArrowRight size={14} />
                     </a>
-                    <button onClick={(event) => { event.currentTarget.closest("details")?.removeAttribute("open"); jumpToSection("ticket-sales"); }}>
-                      <BarChart3 size={16} /><span><strong>Ticket sales</strong><small>Bookings and check-in</small></span><ArrowRight size={14} />
-                    </button>
-                    <button onClick={(event) => { event.currentTarget.closest("details")?.removeAttribute("open"); openEventWizard(); }}>
-                      <Ticket size={16} /><span><strong>Sell tickets</strong><small>Create a live event</small></span><ArrowRight size={14} />
+                    <button onClick={(event) => { event.currentTarget.closest("details")?.removeAttribute("open"); document.getElementById("ticket-sales")?.scrollIntoView({ behavior: "smooth" }); }}>
+                      <ScanLine size={16} /><span><strong>Ticket sales</strong><small>Bookings and check-in</small></span><ArrowRight size={14} />
                     </button>
                     <button onClick={(event) => { event.currentTarget.closest("details")?.removeAttribute("open"); openUploadWizard(); }}>
                       <Upload size={16} /><span><strong>Upload release</strong><small>Share a new track</small></span><ArrowRight size={14} />
                     </button>
                   </div>
                 </details>}
-                <div className="account-chip"><span className="avatar">{user.name.slice(0, 1).toUpperCase()}</span><span className="account-name">{user.name.split(" ")[0]}</span></div>
+                <button type="button" className="account-chip" aria-label="Open account menu" onClick={openSettings}>
+                  <span className="avatar">{user.name.slice(0, 1).toUpperCase()}</span>
+                  <span className="account-name">{user.name.split(" ")[0]}</span>
+                </button>
                 <button className="icon-btn logout-btn" aria-label="Sign out" onClick={logout}><LogOut size={16} /></button>
               </div>
             ) : (
@@ -3101,207 +3127,203 @@ export default function HomePage() {
         </header>
 
         <div className="page-content">
-          <section className="hero">
-            <div className="hero-grain" />
-            <div className="hero-orb hero-orb-one" /><div className="hero-orb hero-orb-two" />
-            <div className="hero-copy">
-              <div className="eyebrow"><span className="eyebrow-line" /> A DIFFERENT KIND OF MUSIC APP</div>
-              <h1>Music finds<br />its <span>people.</span></h1>
-              <p>Less scrolling, more feeling. Discover your next favorite, get closer to the artists, and meet us at the show.</p>
-              <div className="hero-actions"><a className="hero-cta" href="/sound">Find your sound <ArrowRight size={16} /></a><button className="hero-secondary" onClick={() => { setAuthMode("signup"); setModal("signup"); }}>I&apos;m an artist <ArrowDownToLine size={15} /></button></div>
-              <div className="hero-proof"><span className="proof-avatars"><i>J</i><i>M</i><i>A</i><i>+</i></span><span>Good music. Good people. <strong>That&apos;s it.</strong></span></div>
-            </div>
-            <div className="hero-art">
-              <div
-                className="hero-swiper"
-                role="region"
-                aria-roledescription="carousel"
-                aria-label="Featured artists, live music, and podcasts"
-                onMouseEnter={() => setHeroHovered(true)}
-                onMouseLeave={(event) => {
-                  setHeroHovered(false);
-                  if (!event.currentTarget.contains(document.activeElement)) {
-                    setHeroFocused(false);
-                  }
-                }}
-                onFocusCapture={() => setHeroFocused(true)}
-                onBlurCapture={(event) => {
-                  const nextTarget = event.relatedTarget;
-                  if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
-                    setHeroFocused(false);
-                  }
-                }}
-              >
-                <div className="hero-slide-stack" aria-live="off">
-                  {heroSlides.map((slide, index) => {
-                    const distance = (index - heroSlideIndex + heroSlides.length) % heroSlides.length;
-                    const position = distance === 0
-                      ? "current"
-                      : distance === 1
-                        ? "next"
-                        : distance === heroSlides.length - 1
-                          ? "previous"
-                          : "hidden";
-                    return (
-                      <article
-                        className={`hero-slide hero-slide-${position}`}
-                        key={slide.category}
-                        role="group"
-                        aria-roledescription="slide"
-                        aria-label={`${index + 1} of ${heroSlides.length}: ${slide.category}`}
-                        aria-hidden={position !== "current"}
-                      >
-                        <div
-                          className="hero-slide-photo"
-                          role="img"
-                          aria-label={slide.alt}
-                          style={{ backgroundImage: `url("${slide.image}")` }}
+          {isArtistHome ? (
+            <section className="hero artist-spotlight-hero" aria-label="Artist dashboard">
+              <div className="hero-grain" />
+              <div className="hero-orb hero-orb-one" /><div className="hero-orb hero-orb-two" />
+              <div className="artist-spotlight-copy">
+                <div className="eyebrow"><span className="eyebrow-line" /> ARTIST STUDIO</div>
+                <h1>{user?.name ?? artistSpotlight?.name ?? "Your"}<br /><span>spotlight.</span></h1>
+                <p>Fans, listens, and shows — a quick read on how your music is traveling.</p>
+                <div className="hero-actions">
+                  <button className="hero-cta" type="button" onClick={openUploadWizard}>Upload release <Upload size={15} /></button>
+                  <a className="hero-secondary" href={`/artist/${encodeURIComponent(user?.id ?? "")}`}>Open profile <ArrowRight size={15} /></a>
+                </div>
+                {artistTopCity ? <div className="artist-spotlight-city"><MapPin size={14} /><span>Top city right now: <strong>{artistTopCity}</strong></span></div> : null}
+              </div>
+              <div className="artist-spotlight-metrics" aria-label="Artist statistics">
+                <article><span>FANS</span><strong>{(artistSpotlight?.followers ?? 0).toLocaleString()}</strong><small>following you</small></article>
+                <article><span>THIS MONTH</span><strong>{(artistSpotlight?.monthlyListens ?? 0).toLocaleString()}</strong><small>qualified listens</small></article>
+                <article><span>ALL TIME</span><strong>{(artistSpotlight?.totalListens ?? 0).toLocaleString()}</strong><small>total listens</small></article>
+                <article><span>RELEASES</span><strong>{artistReleaseCount.toLocaleString()}</strong><small>on Wiloplay</small></article>
+                <article><span>SHOWS</span><strong>{artistUpcomingShows.toLocaleString()}</strong><small>upcoming</small></article>
+                <article><span>TICKETS</span><strong>{formatPrice(artistRevenueCents)}</strong><small>artist revenue</small></article>
+              </div>
+              <div className="hero-bottom"><span>02 — YOUR ARTIST HOME</span><span>KEEP THE MOMENTUM GOING <span className="hero-bottom-dash">↗</span></span></div>
+            </section>
+          ) : (
+            <section className="hero">
+              <div className="hero-grain" />
+              <div className="hero-orb hero-orb-one" /><div className="hero-orb hero-orb-two" />
+              <div className="hero-copy">
+                <div className="eyebrow"><span className="eyebrow-line" /> A DIFFERENT KIND OF MUSIC APP</div>
+                <h1>Music finds<br />its <span>people.</span></h1>
+                <p>Less scrolling, more feeling. Discover your next favorite, get closer to the artists, and meet us at the show.</p>
+                <div className="hero-actions"><a className="hero-cta" href="/sound">Find your sound <ArrowRight size={16} /></a><button className="hero-secondary" onClick={() => { setAuthMode("signup"); setModal("signup"); }}>I&apos;m an artist <ArrowDownToLine size={15} /></button></div>
+                <div className="hero-proof"><span className="proof-avatars"><i>J</i><i>M</i><i>A</i><i>+</i></span><span>Good music. Good people. <strong>That&apos;s it.</strong></span></div>
+              </div>
+              <div className="hero-art">
+                <div
+                  className="hero-swiper"
+                  role="region"
+                  aria-roledescription="carousel"
+                  aria-label="Featured artists, live music, and podcasts"
+                  onMouseEnter={() => setHeroHovered(true)}
+                  onMouseLeave={(event) => {
+                    setHeroHovered(false);
+                    if (!event.currentTarget.contains(document.activeElement)) {
+                      setHeroFocused(false);
+                    }
+                  }}
+                  onFocusCapture={() => setHeroFocused(true)}
+                  onBlurCapture={(event) => {
+                    const nextTarget = event.relatedTarget;
+                    if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
+                      setHeroFocused(false);
+                    }
+                  }}
+                >
+                  <div className="hero-slide-stack" aria-live="off">
+                    {heroSlides.map((slide, index) => {
+                      const distance = (index - heroSlideIndex + heroSlides.length) % heroSlides.length;
+                      const position = distance === 0
+                        ? "current"
+                        : distance === 1
+                          ? "next"
+                          : distance === heroSlides.length - 1
+                            ? "previous"
+                            : "hidden";
+                      return (
+                        <article
+                          className={`hero-slide hero-slide-${position}`}
+                          key={slide.category}
+                          role="group"
+                          aria-roledescription="slide"
+                          aria-label={`${index + 1} of ${heroSlides.length}: ${slide.category}`}
+                          aria-hidden={position !== "current"}
+                        >
+                          <div
+                            className="hero-slide-photo"
+                            role="img"
+                            aria-label={slide.alt}
+                            style={{ backgroundImage: `url("${slide.image}")` }}
+                          />
+                          <div className="hero-slide-topline"><span>WILOPLAY ORIGINAL</span><AudioLines size={16} /></div>
+                          <div className="hero-slide-copy">
+                            <span>{slide.category}</span>
+                            <strong>{slide.title}</strong>
+                            <small>{slide.detail}</small>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                  <div className="hero-swiper-footer">
+                    <span className="hero-swiper-count">0{heroSlideIndex + 1}<i>/</i>0{heroSlides.length}</span>
+                    <div className="hero-swiper-dots" role="group" aria-label="Choose a featured story">
+                      {heroSlides.map((slide, index) => (
+                        <button
+                          key={slide.category}
+                          type="button"
+                          aria-label={`Show ${slide.category.toLowerCase()}`}
+                          aria-pressed={heroSlideIndex === index}
+                          className={heroSlideIndex === index ? "is-active" : ""}
+                          onClick={() => setHeroSlideIndex(index)}
                         />
-                        <div className="hero-slide-topline"><span>WILOPLAY ORIGINAL</span><AudioLines size={16} /></div>
-                        <div className="hero-slide-copy">
-                          <span>{slide.category}</span>
-                          <strong>{slide.title}</strong>
-                          <small>{slide.detail}</small>
-                        </div>
-                      </article>
-                    );
-                  })}
-                </div>
-                <div className="hero-swiper-footer">
-                  <span className="hero-swiper-count">0{heroSlideIndex + 1}<i>/</i>0{heroSlides.length}</span>
-                  <div className="hero-swiper-dots" role="group" aria-label="Choose a featured story">
-                    {heroSlides.map((slide, index) => (
-                      <button
-                        key={slide.category}
-                        type="button"
-                        aria-label={`Show ${slide.category.toLowerCase()}`}
-                        aria-pressed={heroSlideIndex === index}
-                        className={heroSlideIndex === index ? "is-active" : ""}
-                        onClick={() => setHeroSlideIndex(index)}
-                      />
-                    ))}
+                      ))}
+                    </div>
+                    <div className="hero-swiper-actions">
+                      <button type="button" aria-label="Previous featured story" onClick={() => setHeroSlideIndex((index) => (index + heroSlides.length - 1) % heroSlides.length)}><ArrowLeft size={15} /></button>
+                      <button type="button" aria-label={heroAutoplayPaused ? "Resume featured stories" : "Pause featured stories"} aria-pressed={heroAutoplayPaused} onClick={() => setHeroAutoplayPaused((paused) => !paused)}>{heroAutoplayPaused ? <Play size={13} fill="currentColor" /> : <Pause size={13} />}</button>
+                      <button type="button" aria-label="Next featured story" onClick={() => setHeroSlideIndex((index) => (index + 1) % heroSlides.length)}><ArrowRight size={15} /></button>
+                    </div>
                   </div>
-                  <div className="hero-swiper-actions">
-                    <button type="button" aria-label="Previous featured story" onClick={() => setHeroSlideIndex((index) => (index + heroSlides.length - 1) % heroSlides.length)}><ArrowLeft size={15} /></button>
-                    <button type="button" aria-label={heroAutoplayPaused ? "Resume featured stories" : "Pause featured stories"} aria-pressed={heroAutoplayPaused} onClick={() => setHeroAutoplayPaused((paused) => !paused)}>{heroAutoplayPaused ? <Play size={13} fill="currentColor" /> : <Pause size={13} />}</button>
-                    <button type="button" aria-label="Next featured story" onClick={() => setHeroSlideIndex((index) => (index + 1) % heroSlides.length)}><ArrowRight size={15} /></button>
+                  <div className="hero-floating-note" aria-hidden="true">
+                    <span><AudioLines size={18} /></span>
+                    <div><small>ON THE WILOPLAY RADAR</small><strong>{heroSlides[heroSlideIndex].category}</strong></div>
+                    <i className="hero-note-pulse" />
                   </div>
                 </div>
-                <div className="hero-floating-note" aria-hidden="true">
-                  <span><AudioLines size={18} /></span>
-                  <div><small>ON THE WILOPLAY RADAR</small><strong>{heroSlides[heroSlideIndex].category}</strong></div>
-                  <i className="hero-note-pulse" />
-                </div>
               </div>
-            </div>
-            <div className="hero-bottom"><span>01 — YOUR DAILY RESET</span><span>MADE FOR THE MOMENT YOU&apos;RE IN <span className="hero-bottom-dash">↗</span></span></div>
-          </section>
-
-          {user && (
-            <section className="section dashboard-hub" id="dashboard">
-              <div className="section-heading">
-                <div>
-                  <span className="section-kicker">{user.role === "ARTIST" ? "ARTIST STUDIO" : "YOUR DASHBOARD"}</span>
-                  <h2>{user.role === "ARTIST" ? "Run your music business." : "Everything you need, close by."}</h2>
-                  <p>{user.role === "ARTIST"
-                    ? "Sell tickets, check sales, manage releases, and see how your audience is growing."
-                    : "Find shows, keep your tickets, and get back to the music you love."}</p>
-                </div>
-                <button className="text-link" type="button" onClick={openSettings}>Account settings <ArrowRight size={15} /></button>
-              </div>
-
-              {user.role === "ARTIST" && artistDashboardStats && (
-                <div className="dashboard-metrics" aria-label="Artist overview">
-                  <article><span>Paid tickets</span><strong>{artistDashboardStats.paidTickets}</strong></article>
-                  <article><span>Pending</span><strong>{artistDashboardStats.pendingTickets}</strong></article>
-                  <article><span>Artist revenue</span><strong>{formatPrice(artistDashboardStats.revenueCents)}</strong></article>
-                  <article><span>Releases</span><strong>{artistDashboardStats.releases}</strong></article>
-                  <article><span>Events</span><strong>{artistDashboardStats.events}</strong></article>
-                </div>
-              )}
-
-              {user.role !== "ARTIST" && (
-                <div className="dashboard-metrics" aria-label="Listener overview">
-                  <article><span>Active tickets</span><strong>{activeTicketOrders.length}</strong></article>
-                  <article><span>Liked songs</span><strong>{likedTracks.length}</strong></article>
-                  <article><span>Playlists</span><strong>{playlists.length}</strong></article>
-                  <article><span>Upcoming shows</span><strong>{upcomingEvents.length}</strong></article>
-                </div>
-              )}
-
-              <div className="dashboard-actions">
-                {user.role === "ARTIST" ? <>
-                  <button type="button" className="dashboard-action" onClick={() => jumpToSection("ticket-sales")}>
-                    <span className="dashboard-action-icon"><BarChart3 size={18} /></span>
-                    <span><strong>Ticket sales &amp; analytics</strong><small>Revenue, bookings, and door check-in</small></span>
-                    <ArrowRight size={15} />
-                  </button>
-                  <button type="button" className="dashboard-action" onClick={openEventWizard}>
-                    <span className="dashboard-action-icon"><Ticket size={18} /></span>
-                    <span><strong>Sell tickets</strong><small>Create a show and open sales</small></span>
-                    <ArrowRight size={15} />
-                  </button>
-                  <button type="button" className="dashboard-action" onClick={openUploadWizard}>
-                    <span className="dashboard-action-icon"><Upload size={18} /></span>
-                    <span><strong>Upload music</strong><small>Share a single or album</small></span>
-                    <ArrowRight size={15} />
-                  </button>
-                  <a className="dashboard-action" href={`/artist/${encodeURIComponent(user.id)}`}>
-                    <span className="dashboard-action-icon"><Users size={18} /></span>
-                    <span><strong>Audience insights</strong><small>Followers, listens, and city trends</small></span>
-                    <ArrowRight size={15} />
-                  </a>
-                </> : <>
-                  <button type="button" className="dashboard-action" onClick={() => jumpToSection("my-tickets")}>
-                    <span className="dashboard-action-icon"><QrCode size={18} /></span>
-                    <span><strong>My tickets</strong><small>Bookings and entry QR codes</small></span>
-                    <ArrowRight size={15} />
-                  </button>
-                  <button type="button" className="dashboard-action" onClick={() => jumpToSection("shows")}>
-                    <span className="dashboard-action-icon"><CalendarDays size={18} /></span>
-                    <span><strong>Find live shows</strong><small>Browse and buy tickets</small></span>
-                    <ArrowRight size={15} />
-                  </button>
-                  <button type="button" className="dashboard-action" onClick={() => jumpToSection("library")}>
-                    <span className="dashboard-action-icon"><Heart size={18} /></span>
-                    <span><strong>Your library</strong><small>Liked songs, history, playlists</small></span>
-                    <ArrowRight size={15} />
-                  </button>
-                  <button type="button" className="dashboard-action" onClick={() => void becomeArtist()}>
-                    <span className="dashboard-action-icon"><Mic2 size={18} /></span>
-                    <span><strong>Become an artist</strong><small>Sell tickets and release music</small></span>
-                    <ArrowRight size={15} />
-                  </button>
-                </>}
-              </div>
+              <div className="hero-bottom"><span>01 — YOUR DAILY RESET</span><span>MADE FOR THE MOMENT YOU&apos;RE IN <span className="hero-bottom-dash">↗</span></span></div>
             </section>
           )}
 
           <section className="section discovery-section" id="discovery">
             <div className="section-heading">
               <div><span className="section-kicker">A GOOD PLACE TO START</span><h2>{query ? "Your search, your sound." : "What are we feeling?"}</h2><p>{query ? `Showing the good stuff for “${query}”` : <>A little moodboard for wherever your head&apos;s at.</>}</p></div>
-              <button className="text-link" onClick={openSearch}>Search something <ArrowRight size={15} /></button>
+              <div className="section-heading-actions">
+                <button className="text-link" onClick={openSearch}>Search something <ArrowRight size={15} /></button>
+                <div className="mood-slider-controls" aria-label="Mood slider controls">
+                  <button type="button" className="mood-slider-nav" aria-label="Previous mood" onClick={() => scrollMoodSlider(-1)}><ArrowLeft size={15} /></button>
+                  <button type="button" className="mood-slider-nav" aria-label="Next mood" onClick={() => scrollMoodSlider(1)}><ArrowRight size={15} /></button>
+                </div>
+              </div>
             </div>
-            <div className="mood-grid" id="for-you">{moods.map((mood, index) => (
-              <button className="mood-card" key={mood.label} style={{ "--mood-color": mood.color, "--mood-image": `url(https://images.unsplash.com/${mood.art}?w=850&h=420&fit=crop)` } as React.CSSProperties} onClick={() => { setQuery(mood.query); void searchTracks(mood.query); document.getElementById("track-list")?.scrollIntoView({ behavior: "smooth" }); }}>
-                <div className="mood-art" /><span className="mood-number">0{index + 1} / MOOD</span><span className="mood-card-copy"><strong>{mood.label}</strong><small>{mood.sub}</small></span><span className="mood-play"><Play size={15} fill="currentColor" /></span>
-              </button>
-            ))}</div>
-            {catalogGenres.length > 0 && (
-              <div className="search-filter-row search-filter-row-inline catalog-genre-row" aria-label="Browse catalog genres">
-                {catalogGenres.map((genre) => (
+            <div className="mood-slider" id="for-you">
+              <div
+                className="mood-slider-track"
+                ref={moodSliderRef}
+                onScroll={syncMoodSlideIndex}
+                aria-label="Mood board"
+              >
+                {moods.map((mood, index) => (
                   <button
-                    key={genre}
-                    type="button"
-                    className={`search-filter${activeCatalogGenre === genre ? " is-active" : ""}`}
+                    className={`mood-card${moodSlideIndex === index ? " is-active" : ""}`}
+                    key={mood.label}
+                    style={{ "--mood-color": mood.color, "--mood-image": `url(https://images.unsplash.com/${mood.art}?w=850&h=420&fit=crop)` } as React.CSSProperties}
                     onClick={() => {
-                      void browseCatalogGenre(genre);
+                      setQuery(mood.query);
+                      void searchTracks(mood.query);
                       document.getElementById("track-list")?.scrollIntoView({ behavior: "smooth" });
                     }}
                   >
-                    {genre}
+                    <div className="mood-art" />
+                    <span className="mood-number">0{index + 1} / MOOD</span>
+                    <span className="mood-card-copy"><strong>{mood.label}</strong><small>{mood.sub}</small></span>
+                    <span className="mood-play"><Play size={15} fill="currentColor" /></span>
                   </button>
                 ))}
+              </div>
+              <div className="mood-slider-dots" role="group" aria-label="Mood slides">
+                {moods.map((mood, index) => (
+                  <button
+                    key={mood.label}
+                    type="button"
+                    className={moodSlideIndex === index ? "is-active" : ""}
+                    aria-label={`Show ${mood.label}`}
+                    aria-pressed={moodSlideIndex === index}
+                    onClick={() => {
+                      const track = moodSliderRef.current;
+                      const card = track?.querySelectorAll<HTMLElement>(".mood-card")[index];
+                      card?.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+                      setMoodSlideIndex(index);
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+            {catalogGenres.length > 0 && (
+              <div className="genre-slider" aria-label="Browse catalog genres">
+                <div className="genre-slider-controls">
+                  <button type="button" className="mood-slider-nav" aria-label="Previous genres" onClick={() => scrollGenreSlider(-1)}><ArrowLeft size={14} /></button>
+                  <button type="button" className="mood-slider-nav" aria-label="Next genres" onClick={() => scrollGenreSlider(1)}><ArrowRight size={14} /></button>
+                </div>
+                <div className="genre-slider-track" ref={genreSliderRef}>
+                  {catalogGenres.map((genre) => (
+                    <button
+                      key={genre}
+                      type="button"
+                      className={`search-filter genre-slide-chip${activeCatalogGenre === genre ? " is-active" : ""}`}
+                      onClick={() => {
+                        void browseCatalogGenre(genre);
+                        document.getElementById("track-list")?.scrollIntoView({ behavior: "smooth" });
+                      }}
+                    >
+                      {genre}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
           </section>
@@ -3473,11 +3495,11 @@ export default function HomePage() {
             <button className="browse-more" onClick={openSearch}>Keep exploring <ArrowRight size={15} /></button>
           </section>
 
-          <section className="artist-banner">
+          {!isArtistHome && <section className="artist-banner">
             <div className="artist-banner-art"><span>✳</span><span>♫</span><span>✴</span></div>
-            <div className="artist-banner-copy"><span className="section-kicker">FOR THE ONES MAKING THE MUSIC</span><h2>Your music deserves<br />to be <em>out there.</em></h2><p>Share your tracks, put on a show, and find the people who get it.</p><button className="banner-cta" onClick={() => user?.role === "ARTIST" ? openUploadWizard() : user ? void becomeArtist() : (setAuthMode("signup"), setModal("signup"))}>{user?.role === "ARTIST" ? "Upload your music" : "Make your artist account"} <ArrowRight size={15} /></button></div>
+            <div className="artist-banner-copy"><span className="section-kicker">FOR THE ONES MAKING THE MUSIC</span><h2>Your music deserves<br />to be <em>out there.</em></h2><p>Share your tracks, put on a show, and find the people who get it.</p><button className="banner-cta" onClick={() => user ? void becomeArtist() : (setAuthMode("signup"), setModal("signup"))}>Make your artist account <ArrowRight size={15} /></button></div>
             <span className="artist-banner-caption">YOUR NEXT CHAPTER STARTS HERE — 02</span>
-          </section>
+          </section>}
 
           <section className="tickets-cta-band" aria-label="Tickets">
             <div className="tickets-cta-copy">
@@ -3508,7 +3530,10 @@ export default function HomePage() {
           <section className="section my-tickets-section" id="my-tickets">
             <div className="section-heading">
               <div><span className="section-kicker">YOUR NEXT NIGHT OUT</span><h2>My tickets.</h2><p>Your bookings and entry codes, all in one place.</p></div>
-              {user && <button className="text-link" onClick={() => void loadMyTicketOrders()}>Refresh tickets <ArrowRight size={15} /></button>}
+              <div className="section-heading-actions">
+                {user && <button className="text-link" onClick={() => void loadMyTicketOrders()}>Refresh tickets <ArrowRight size={15} /></button>}
+                <button className="text-link" onClick={() => void openCreateTickets()}>Create new <Plus size={15} /></button>
+              </div>
             </div>
             {!user ? <div className="ticket-empty"><p>Sign in to see your bookings and QR codes.</p><button className="ticket-button" onClick={() => { setAuthMode("login"); setModal("login"); }}>Log in to your account</button></div>
               : activeTicketOrders.length ? <div className="my-ticket-grid">{activeTicketOrders.map((order) => (
@@ -3521,7 +3546,7 @@ export default function HomePage() {
                     <div className="qr-ticket" key={ticket.id}><a href={ticket.qrDataUrl} download={`wiloplay-ticket-${ticket.code}.png`} aria-label={`Download ticket ${ticket.code}`}><img src={ticket.qrDataUrl} alt={`QR ticket ${ticket.code}`} /></a><div><strong>{ticket.checkedInAt ? "Already checked in" : "Ready for entry"}</strong><code>{ticket.code}</code><span>{ticket.checkedInAt ? `Scanned ${new Date(ticket.checkedInAt).toLocaleString()}` : "Show this QR code at the door."}</span><a className="ticket-download" href={ticket.qrDataUrl} download={`wiloplay-ticket-${ticket.code}.png`}><Download size={13} /> Download QR</a></div><BadgeCheck size={18} /></div>
                   ))}</div>}
                 </article>
-              ))}</div> : <div className="ticket-empty"><QrCode size={24} /><p>{myTicketOrders.length ? "Your show has passed. Tickets are automatically archived here after showtime; payment and entry records are preserved." : "Your ticket bookings will appear here after checkout."}</p></div>}
+              ))}</div> : <div className="ticket-empty"><QrCode size={24} /><p>{myTicketOrders.length ? "Your show has passed. Tickets are automatically archived here after showtime; payment and entry records are preserved." : "Your ticket bookings will appear here after checkout. Create a show to start selling tickets, or grab one from Live shows."}</p><button className="ticket-button" onClick={() => void openCreateTickets()}>Create new <Plus size={14} /></button></div>}
           </section>
 
           {user?.role === "ARTIST" && <section className="section sales-dashboard" id="ticket-sales">
@@ -3660,15 +3685,7 @@ export default function HomePage() {
         {!queue.length && !shownTracks.some((track) => track.preview || track.audioUrl) && <p className="queue-empty">Start a track to build your queue.</p>}
       </aside>}
 
-      {notice && (
-        <div className="toast-stack" aria-live="polite">
-          <div className="toast toast-success is-visible" role="status">
-            <span className="toast-icon"><Check size={15} /></span>
-            <p className="toast-copy">{notice}</p>
-            <button className="toast-dismiss" onClick={() => setNotice("")} aria-label="Dismiss"><X size={14} /></button>
-          </div>
-        </div>
-      )}
+      {notice && <div className="toast" role="status"><span><Check size={15} /></span>{notice}<button onClick={() => setNotice("")} aria-label="Dismiss"><X size={14} /></button></div>}
 
       {playlistDialog && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !libraryBusy) { setPlaylistDialog(null); setLibraryError(""); } }}>
         <section className="modal-card playlist-dialog" role="dialog" aria-modal="true" aria-labelledby="playlist-dialog-heading">
@@ -3689,7 +3706,7 @@ export default function HomePage() {
       </div>}
 
       {modal && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeModal(); }}>
-        <section key={modal} className={`modal-card${modal === "upload" || modal === "event" ? " wizard-modal" : ""}${modal === "login" || modal === "signup" || modal === "forgot-password" || modal === "reset-password" || modal === "email-verification" || modal === "settings" ? " auth-modal" : ""}${modal === "email-verification" ? " email-verify-modal" : ""}${modal === "forgot-password" || modal === "reset-password" ? " reset-password-modal" : ""}${modal === "settings" ? " settings-modal" : ""}`} role="dialog" aria-modal="true" aria-labelledby="modal-heading">
+        <section key={modal} className={`modal-card${modal === "upload" || modal === "event" ? " wizard-modal" : ""}${modal === "login" || modal === "signup" || modal === "forgot-password" || modal === "reset-password" || modal === "email-verification" || modal === "settings" ? " auth-modal" : ""}`} role="dialog" aria-modal="true" aria-labelledby="modal-heading">
           <button className="modal-close" aria-label="Close dialog" onClick={closeModal}><X size={18} /></button>
           {(modal === "login" || modal === "signup") ? <>
             <div className="auth-modal-hero">
@@ -3724,61 +3741,25 @@ export default function HomePage() {
               <p className="auth-legal-links"><a href="/terms" target="_blank" rel="noreferrer">Terms and Conditions</a><span>·</span><a href="/privacy" target="_blank" rel="noreferrer">Privacy Policy</a></p>
             </div>
           </> : modal === "forgot-password" ? <>
-            <div className="auth-modal-body auth-modal-body-solo reset-password-body">
-              <div className="reset-password-hero">
-                <div className="email-verify-icon" aria-hidden="true"><KeyRound size={22} /></div>
-                <span className="section-kicker">ACCOUNT RECOVERY</span>
-                <h2 id="modal-heading">Reset your password</h2>
-                <p className="modal-subtitle">Enter the email on your account. We&apos;ll send a 6-digit code if it matches.</p>
-              </div>
-              <form className="modal-form reset-password-form" onSubmit={(event) => void submitForgotPassword(event)}>
+            <div className="auth-modal-body auth-modal-body-solo">
+              <div className="modal-logo"><AudioLines size={21} /></div>
+              <span className="section-kicker">ACCOUNT RECOVERY</span><h2 id="modal-heading">Reset your password.</h2>
+              <p className="modal-subtitle">Enter the email on your account. We&apos;ll send a six-digit code if it matches. You can also use this to resend a password reset code.</p>
+              <form className="modal-form" onSubmit={(event) => void submitForgotPassword(event)}>
                 <label>Email address<input name="email" type="email" autoComplete="email" placeholder="you@somewhere.com" value={authDraft.email} onChange={(event) => setAuthDraft((draft) => ({ ...draft, email: event.target.value }))} required /></label>
                 {error && <div className="form-error" role="alert">{error}</div>}
                 <button className="form-submit" disabled={busy || !authDraft.email.trim()}>{busy ? "Sending..." : "Send reset code"} <ArrowRight size={15} /></button>
               </form>
-              <div className="auth-link-row email-verify-actions">
-                <button type="button" onClick={() => { setAuthMode("login"); setModal("login"); setError(""); }}>Back to log in</button>
-                <button type="button" onClick={() => { setAuthMode("signup"); setModal("signup"); setError(""); }}>Create an account</button>
-              </div>
-              <p className="auth-legal-links"><a href="/terms" target="_blank" rel="noreferrer">Terms</a><span>·</span><a href="/privacy" target="_blank" rel="noreferrer">Privacy</a></p>
+              <div className="auth-link-row"><button type="button" onClick={() => { setAuthMode("login"); setModal("login"); setError(""); }}>Back to log in</button><button type="button" onClick={() => { setAuthMode("signup"); setModal("signup"); setError(""); }}>Create an account</button></div>
+              <p className="auth-legal-links"><a href="/terms" target="_blank" rel="noreferrer">Terms and Conditions</a><span>·</span><a href="/privacy" target="_blank" rel="noreferrer">Privacy Policy</a></p>
             </div>
           </> : modal === "reset-password" ? <>
-            <div className="auth-modal-body auth-modal-body-solo reset-password-body">
-              <div className="reset-password-hero">
-                <div className="email-verify-icon" aria-hidden="true"><KeyRound size={22} /></div>
-                <span className="section-kicker">CHOOSE A NEW PASSWORD</span>
-                <h2 id="modal-heading">Almost there</h2>
-                <p className="modal-subtitle">Enter the code we sent, then set a new password.</p>
-                <div className="email-verify-meta">
-                  <span className="email-verify-chip" title={verificationEmail}>{maskEmailAddress(verificationEmail)}</span>
-                  <span className="email-verify-chip email-verify-chip-soft">Expires in {Math.max(1, Math.ceil(resetExpiresInSeconds / 60))} min</span>
-                </div>
-              </div>
-              <form className="modal-form reset-password-form" onSubmit={(event) => void submitResetPassword(event)}>
-                <div className="email-verify-otp" role="group" aria-label="Reset code">
-                  {Array.from({ length: 6 }, (_, index) => (
-                    <input
-                      key={index}
-                      ref={(node) => { resetOtpRefs.current[index] = node; }}
-                      className="email-verify-otp-input"
-                      type="text"
-                      inputMode="numeric"
-                      autoComplete={index === 0 ? "one-time-code" : "off"}
-                      aria-label={`Digit ${index + 1}`}
-                      maxLength={6}
-                      value={resetCode[index] ?? ""}
-                      onChange={(event) => updateResetOtpDigit(index, event.target.value)}
-                      onKeyDown={(event) => handleResetOtpKeyDown(index, event.key)}
-                      onFocus={(event) => event.currentTarget.select()}
-                      onPaste={(event) => {
-                        event.preventDefault();
-                        setResetOtpValue(event.clipboardData.getData("text"));
-                      }}
-                      disabled={busy}
-                    />
-                  ))}
-                </div>
-                <input type="hidden" name="code" value={resetCode} />
+            <div className="auth-modal-body auth-modal-body-solo">
+              <div className="modal-logo"><AudioLines size={21} /></div>
+              <span className="section-kicker">CHOOSE A NEW PASSWORD</span><h2 id="modal-heading">Almost there.</h2>
+              <p className="modal-subtitle">Enter the code sent to <strong>{verificationEmail}</strong> and pick a new password. Codes expire in {Math.max(1, Math.ceil(resetExpiresInSeconds / 60))} minutes.</p>
+              <form className="modal-form" onSubmit={(event) => void submitResetPassword(event)}>
+                <label>Reset code<input className="email-verification-code" name="code" type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} placeholder="000000" value={resetCode} onChange={(event) => setResetCode(event.target.value.replace(/\D/g, "").slice(0, 6))} required /></label>
                 <label>New password
                   <span className="password-field">
                     <input id="reset-password" name="password" type={resetPasswordVisible ? "text" : "password"} autoComplete="new-password" placeholder="8+ chars, letter and number" value={resetPasswordDraft} onChange={(event) => setResetPasswordDraft(event.target.value)} minLength={8} required />
@@ -3788,95 +3769,64 @@ export default function HomePage() {
                 {error && <div className="form-error" role="alert">{error}</div>}
                 <button className="form-submit" disabled={busy || resetCode.length !== 6 || resetPasswordDraft.length < 8}>{busy ? "Saving..." : "Update password"} <ArrowRight size={15} /></button>
               </form>
-              <div className="auth-link-row email-verify-actions">
-                <button type="button" disabled={busy} onClick={() => { setModal("forgot-password"); setError(""); }}>Resend code</button>
-                <button type="button" onClick={() => { setAuthMode("login"); setModal("login"); setError(""); }}>Back to log in</button>
-              </div>
-              <p className="auth-legal-links"><a href="/terms" target="_blank" rel="noreferrer">Terms</a><span>·</span><a href="/privacy" target="_blank" rel="noreferrer">Privacy</a></p>
+              <div className="auth-link-row"><button type="button" disabled={busy} onClick={() => { setModal("forgot-password"); setError(""); }}>Resend password reset code</button><button type="button" onClick={() => { setAuthMode("login"); setModal("login"); setError(""); }}>Back to log in</button></div>
             </div>
           </> : modal === "email-verification" ? <>
-            <div className="auth-modal-body auth-modal-body-solo email-verify-body">
-              <div className="email-verify-hero">
-                <div className="email-verify-icon" aria-hidden="true"><Mail size={22} /></div>
-                <span className="section-kicker">CHECK YOUR INBOX</span>
-                <h2 id="modal-heading">Verify your email</h2>
-                <p className="modal-subtitle">Enter the 6-digit code we sent you. Logging in again brings you back here until this is done.</p>
-                <div className="email-verify-meta">
-                  <span className="email-verify-chip" title={verificationEmail}>{maskEmailAddress(verificationEmail)}</span>
-                  <span className="email-verify-chip email-verify-chip-soft">Expires in {Math.max(1, Math.ceil(verificationExpiresInSeconds / 60))} min</span>
-                </div>
-              </div>
-              <form className="modal-form email-verify-form" onSubmit={(event) => void verifyEmail(event)}>
-                <div className="email-verify-otp" role="group" aria-label="Verification code">
-                  {Array.from({ length: 6 }, (_, index) => (
-                    <input
-                      key={index}
-                      ref={(node) => { verificationOtpRefs.current[index] = node; }}
-                      className="email-verify-otp-input"
-                      type="text"
-                      inputMode="numeric"
-                      autoComplete={index === 0 ? "one-time-code" : "off"}
-                      aria-label={`Digit ${index + 1}`}
-                      maxLength={6}
-                      value={verificationCode[index] ?? ""}
-                      onChange={(event) => updateVerificationOtpDigit(index, event.target.value)}
-                      onKeyDown={(event) => handleVerificationOtpKeyDown(index, event.key)}
-                      onFocus={(event) => event.currentTarget.select()}
-                      onPaste={(event) => {
-                        event.preventDefault();
-                        setVerificationOtpValue(event.clipboardData.getData("text"));
-                      }}
-                      disabled={busy}
-                    />
-                  ))}
-                </div>
-                <input type="hidden" name="code" value={verificationCode} />
+            <div className="auth-modal-body auth-modal-body-solo">
+              <div className="modal-logo"><AudioLines size={21} /></div>
+              <span className="section-kicker">CHECK YOUR INBOX</span><h2 id="modal-heading">Verify your email.</h2>
+              <p className="modal-subtitle">We sent a six-digit code to <strong>{verificationEmail}</strong>. It expires in {Math.max(1, Math.ceil(verificationExpiresInSeconds / 60))} minutes. Logging in again continues here until you verify.</p>
+              <form className="modal-form" onSubmit={(event) => void verifyEmail(event)}>
+                <label>Verification code<input className="email-verification-code" name="code" type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} placeholder="000000" value={verificationCode} onChange={(event) => setVerificationCode(event.target.value.replace(/\D/g, "").slice(0, 6))} required /></label>
                 {error && <div className="form-error" role="alert">{error}</div>}
                 <button className="form-submit" disabled={busy || verificationCode.length !== 6}>{busy ? "Verifying..." : "Verify email"} <ArrowRight size={15} /></button>
               </form>
-              <div className="auth-link-row email-verify-actions">
-                <button type="button" disabled={busy} onClick={() => void resendEmailVerification()}>Resend code</button>
-                <button type="button" onClick={() => { setAuthMode("login"); setModal("login"); setError(""); }}>Back to log in</button>
-              </div>
-              <p className="auth-legal-links"><a href="/terms" target="_blank" rel="noreferrer">Terms</a><span>·</span><a href="/privacy" target="_blank" rel="noreferrer">Privacy</a></p>
+              <div className="auth-link-row"><button type="button" disabled={busy} onClick={() => void resendEmailVerification()}>Resend verification code</button><button type="button" onClick={() => { setAuthMode("login"); setModal("login"); setError(""); }}>Back to log in</button></div>
+              <p className="auth-legal-links"><a href="/terms" target="_blank" rel="noreferrer">Terms and Conditions</a><span>·</span><a href="/privacy" target="_blank" rel="noreferrer">Privacy Policy</a></p>
             </div>
           </> : modal === "settings" ? <>
-            <div className="auth-modal-body auth-modal-body-solo settings-body">
-              <div className="settings-hero">
-                <div className="settings-avatar" aria-hidden="true">{(user?.name ?? "W").slice(0, 1).toUpperCase()}</div>
-                <span className="section-kicker">YOUR ACCOUNT</span>
-                <h2 id="modal-heading">Profile &amp; settings</h2>
-                <p className="modal-subtitle">Keep your identity sharp and jump straight into the tools that matter.</p>
-                <div className="settings-identity">
+            <div className="auth-modal-body auth-modal-body-solo">
+              <div className="modal-logo"><Settings size={21} /></div>
+              <span className="section-kicker">YOUR ACCOUNT</span>
+              <h2 id="modal-heading">Profile &amp; settings.</h2>
+              <p className="modal-subtitle">Update how you show up on Wiloplay and jump into the rest of the app.</p>
+              <div className="settings-summary">
+                <span className="avatar">{(user?.name ?? "W").slice(0, 1).toUpperCase()}</span>
+                <div>
                   <strong>{user?.name}</strong>
-                  <span>{user?.email}</span>
-                  <div className="settings-badges">
-                    <span className="settings-badge">{user?.role === "ARTIST" ? "Artist" : "Listener"}</span>
-                    {user?.emailVerifiedAt && <span className="settings-badge settings-badge-ok"><BadgeCheck size={12} /> Verified</span>}
-                  </div>
+                  <small>{user?.email}</small>
+                  <small>{user?.role === "ARTIST" ? "Artist account" : "Listener account"}{user?.emailVerifiedAt ? " · Verified" : ""}</small>
                 </div>
               </div>
-
-              <div className="settings-shortcuts" aria-label="Quick access">
+              <div className="settings-quick-actions" aria-label="Quick actions">
+                <button type="button" onClick={() => { setModal(null); document.getElementById("my-tickets")?.scrollIntoView({ behavior: "smooth" }); }}>
+                  <QrCode size={15} /><span>My tickets</span>
+                </button>
+                <button type="button" onClick={() => { setModal(null); document.getElementById("shows")?.scrollIntoView({ behavior: "smooth" }); }}>
+                  <Ticket size={15} /><span>Live shows</span>
+                </button>
+                <button type="button" onClick={() => { setModal(null); openLibraryTab("liked"); }}>
+                  <Heart size={15} /><span>Liked songs</span>
+                </button>
                 {user?.role === "ARTIST" ? <>
-                  <button type="button" onClick={() => jumpToSection("dashboard")}><LayoutDashboard size={15} /><span>Studio overview</span></button>
-                  <button type="button" onClick={() => jumpToSection("ticket-sales")}><BarChart3 size={15} /><span>Ticket sales</span></button>
-                  <button type="button" onClick={() => { setModal(null); openEventWizard(); }}><Ticket size={15} /><span>Sell tickets</span></button>
-                  <a href={`/artist/${encodeURIComponent(user.id)}`}><Users size={15} /><span>Audience</span></a>
-                </> : <>
-                  <button type="button" onClick={() => jumpToSection("dashboard")}><LayoutDashboard size={15} /><span>Dashboard</span></button>
-                  <button type="button" onClick={() => jumpToSection("my-tickets")}><QrCode size={15} /><span>My tickets</span></button>
-                  <button type="button" onClick={() => jumpToSection("shows")}><CalendarDays size={15} /><span>Live shows</span></button>
-                  <button type="button" onClick={() => { setModal(null); void becomeArtist(); }}><Mic2 size={15} /><span>Become artist</span></button>
-                </>}
+                  <button type="button" onClick={() => { setModal(null); openUploadWizard(); }}>
+                    <Upload size={15} /><span>Upload music</span>
+                  </button>
+                  <button type="button" onClick={() => { setModal(null); openEventWizard(); }}>
+                    <CalendarDays size={15} /><span>Create event</span>
+                  </button>
+                  <button type="button" onClick={() => { setModal(null); document.getElementById("ticket-sales")?.scrollIntoView({ behavior: "smooth" }); }}>
+                    <ScanLine size={15} /><span>Ticket sales</span>
+                  </button>
+                </> : (
+                  <button type="button" onClick={() => { setModal(null); void becomeArtist(); }}>
+                    <Mic2 size={15} /><span>Become an artist</span>
+                  </button>
+                )}
               </div>
-
-              <form className="modal-form auth-form settings-form" onSubmit={(event) => void submitSettings(event)}>
-                <div className="settings-panel">
-                  <span className="settings-panel-label">Profile</span>
-                  <label>Display name<input value={settingsName} onChange={(event) => setSettingsName(event.target.value)} maxLength={60} required /></label>
-                  <label>City for trends <span className="wizard-optional">OPTIONAL</span><input value={cityDraft} onChange={(event) => setCityDraft(event.target.value)} placeholder="e.g. Lagos" maxLength={80} /></label>
-                </div>
+              <form className="modal-form auth-form" onSubmit={(event) => void submitSettings(event)}>
+                <label>Display name<input value={settingsName} onChange={(event) => setSettingsName(event.target.value)} maxLength={60} required /></label>
+                <label>City for trends <span className="wizard-optional">OPTIONAL</span><input value={cityDraft} onChange={(event) => setCityDraft(event.target.value)} placeholder="e.g. Lagos" maxLength={80} /></label>
                 <div className="settings-row">
                   <div><strong>Appearance</strong><small>Switch between light and dark mode</small></div>
                   <button className="theme-toggle" type="button" onClick={toggleTheme}>{theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}<span>{theme === "dark" ? "Light" : "Dark"}</span></button>
@@ -3884,11 +3834,11 @@ export default function HomePage() {
                 {error && <div className="form-error" role="alert">{error}</div>}
                 <button className="form-submit" type="submit">Save settings <ArrowRight size={15} /></button>
               </form>
-              <div className="auth-link-row settings-footer-links">
+              <div className="auth-link-row">
                 {user?.role === "ARTIST" && <a href={`/artist/${encodeURIComponent(user.id)}`}>Open artist profile</a>}
                 <button type="button" onClick={() => { closeModal(); logout(); }}>Sign out</button>
               </div>
-              <p className="auth-legal-links"><a href="/terms" target="_blank" rel="noreferrer">Terms</a><span>·</span><a href="/privacy" target="_blank" rel="noreferrer">Privacy</a></p>
+              <p className="auth-legal-links"><a href="/terms" target="_blank" rel="noreferrer">Terms and Conditions</a><span>·</span><a href="/privacy" target="_blank" rel="noreferrer">Privacy Policy</a></p>
             </div>
           </> : modal === "upload" ? <>
             <div className="modal-logo"><AudioLines size={21} /></div>

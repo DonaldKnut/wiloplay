@@ -46,6 +46,9 @@ export class TicketEmailService {
           auth: process.env.SMTP_USER && process.env.SMTP_PASSWORD
             ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD }
             : undefined,
+          connectionTimeout: 15_000,
+          greetingTimeout: 15_000,
+          socketTimeout: 20_000,
         })
       : null;
   }

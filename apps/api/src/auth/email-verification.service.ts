@@ -19,6 +19,10 @@ export class EmailVerificationService {
           auth: process.env.SMTP_USER && process.env.SMTP_PASSWORD
             ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD }
             : undefined,
+          // Prevent Render/Gmail hangs from freezing signup for minutes.
+          connectionTimeout: 15_000,
+          greetingTimeout: 15_000,
+          socketTimeout: 20_000,
         })
       : null;
   }
