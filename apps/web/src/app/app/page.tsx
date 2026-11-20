@@ -6,8 +6,10 @@ import {
   ArrowRight,
   AudioLines,
   BadgeCheck,
+  BarChart3,
   BellRing,
   Check,
+  LayoutDashboard,
   ChevronDown,
   Compass,
   CreditCard,
@@ -21,9 +23,11 @@ import {
   Home,
   ImagePlus,
   Info,
+  KeyRound,
   LogOut,
   Link2,
   ListMusic,
+  Mail,
   Maximize2,
   MapPin,
   Menu,
@@ -775,8 +779,10 @@ export default function HomePage() {
   const [verificationEmail, setVerificationEmail] = useState("");
   const [verificationCode, setVerificationCode] = useState("");
   const [verificationPassword, setVerificationPassword] = useState("");
+  const verificationOtpRefs = useRef<Array<HTMLInputElement | null>>([]);
   const [resetCode, setResetCode] = useState("");
   const [resetPasswordDraft, setResetPasswordDraft] = useState("");
+  const resetOtpRefs = useRef<Array<HTMLInputElement | null>>([]);
   const [resetExpiresInSeconds, setResetExpiresInSeconds] = useState(600);
   const [verificationExpiresInSeconds, setVerificationExpiresInSeconds] = useState(0);
   const [user, setUser] = useState<User | null>(null);
@@ -1728,6 +1734,18 @@ export default function HomePage() {
     setVolume(lastAudibleVolumeRef.current || 0.75);
   }
 
+  function jumpToSection(sectionId: string) {
+    setModal(null);
+    setError("");
+    setFieldErrors({});
+    setMobileNav(false);
+    window.setTimeout(() => {
+      const target = document.getElementById(sectionId)
+        ?? (sectionId === "dashboard" ? document.getElementById("home") : null);
+      target?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 40);
+  }
+
   function openSettings() {
     setMobileNav(false);
     if (!user) {
@@ -1776,6 +1794,7 @@ export default function HomePage() {
     showMessage(challenge.sent
       ? `A verification code was sent to ${challenge.email}.`
       : `Enter the code already sent to ${challenge.email}, or resend in a minute.`);
+    window.setTimeout(() => focusVerificationOtp(0), 40);
   }
 
   async function handleAuth(event: FormEvent<HTMLFormElement>) {
@@ -1840,7 +1859,22 @@ export default function HomePage() {
     }
   }
 
-  function establishSession(session: AuthSession, message: string) {
+  function goToDashboard() {
+    setMobileNav(false);
+    setSearchOpen(false);
+    setActiveNav("home");
+    window.setTimeout(() => {
+      const dashboard = document.getElementById("dashboard");
+      if (dashboard) {
+        dashboard.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+      }
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      document.getElementById("home")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 40);
+  }
+
+  function establishSession(session: AuthSession, message: string, options?: { goToDashboard?: boolean }) {
     localStorage.setItem("sonora-token", session.accessToken);
     localStorage.setItem("sonora-user", JSON.stringify(session.user));
     setToken(session.accessToken);
@@ -1850,8 +1884,11 @@ export default function HomePage() {
     setVerificationCode("");
     setResetCode("");
     setResetPasswordDraft("");
+    setError("");
+    setFieldErrors({});
     setModal(checkoutEvent ? "checkout" : null);
     showMessage(message);
+    if (options?.goToDashboard && !checkoutEvent) goToDashboard();
   }
 
   async function resendEmailVerification() {
@@ -1919,6 +1956,72 @@ export default function HomePage() {
     }
   }
 
+  function maskEmailAddress(email: string) {
+    const [local = "", domain = ""] = email.split("@");
+    if (!domain) return email;
+    if (local.length <= 2) return `${local[0] ?? ""}••@${domain}`;
+    return `${local.slice(0, 2)}•••${local.slice(-1)}@${domain}`;
+  }
+
+  function focusVerificationOtp(index: number) {
+    verificationOtpRefs.current[Math.max(0, Math.min(5, index))]?.focus();
+  }
+
+  function setVerificationOtpValue(next: string) {
+    const digits = next.replace(/\D/g, "").slice(0, 6);
+    setVerificationCode(digits);
+    focusVerificationOtp(Math.min(digits.length, 5));
+  }
+
+  function updateVerificationOtpDigit(index: number, raw: string) {
+    const incoming = raw.replace(/\D/g, "");
+    if (incoming.length > 1) {
+      setVerificationOtpValue(incoming);
+      return;
+    }
+    const digits = Array.from({ length: 6 }, (_, slot) => verificationCode[slot] ?? "");
+    digits[index] = incoming.slice(-1);
+    const next = digits.join("").replace(/\s/g, "");
+    setVerificationCode(next);
+    if (incoming) focusVerificationOtp(index + 1);
+  }
+
+  function handleVerificationOtpKeyDown(index: number, key: string) {
+    if (key === "Backspace" && !verificationCode[index]) {
+      focusVerificationOtp(index - 1);
+    }
+    if (key === "ArrowLeft") focusVerificationOtp(index - 1);
+    if (key === "ArrowRight") focusVerificationOtp(index + 1);
+  }
+
+  function focusResetOtp(index: number) {
+    resetOtpRefs.current[Math.max(0, Math.min(5, index))]?.focus();
+  }
+
+  function setResetOtpValue(next: string) {
+    const digits = next.replace(/\D/g, "").slice(0, 6);
+    setResetCode(digits);
+    focusResetOtp(Math.min(digits.length, 5));
+  }
+
+  function updateResetOtpDigit(index: number, raw: string) {
+    const incoming = raw.replace(/\D/g, "");
+    if (incoming.length > 1) {
+      setResetOtpValue(incoming);
+      return;
+    }
+    const digits = Array.from({ length: 6 }, (_, slot) => resetCode[slot] ?? "");
+    digits[index] = incoming.slice(-1);
+    setResetCode(digits.join("").replace(/\s/g, ""));
+    if (incoming) focusResetOtp(index + 1);
+  }
+
+  function handleResetOtpKeyDown(index: number, key: string) {
+    if (key === "Backspace" && !resetCode[index]) focusResetOtp(index - 1);
+    if (key === "ArrowLeft") focusResetOtp(index - 1);
+    if (key === "ArrowRight") focusResetOtp(index + 1);
+  }
+
   async function verifyEmail(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
@@ -1936,7 +2039,11 @@ export default function HomePage() {
         null,
         { method: "POST", body: JSON.stringify(parsed.data) },
       );
-      establishSession(result, "Your email is verified. Welcome to Wiloplay.");
+      establishSession(
+        result,
+        "You're verified successfully. Welcome to your dashboard.",
+        { goToDashboard: true },
+      );
     } catch (reason) {
       setError(authErrorMessage(reason, "Could not verify your email."));
     } finally {
@@ -1968,6 +2075,7 @@ export default function HomePage() {
       setResetPasswordDraft("");
       setModal("reset-password");
       showMessage(result.message);
+      window.setTimeout(() => focusResetOtp(0), 40);
     } catch (reason) {
       setError(authErrorMessage(reason, "Could not start password reset."));
     } finally {
@@ -2640,6 +2748,16 @@ export default function HomePage() {
   const activeTicketOrders = myTicketOrders.filter(
     (order) => new Date(order.event.startsAt).getTime() > now,
   );
+  const artistDashboardStats = useMemo(() => {
+    if (user?.role !== "ARTIST") return null;
+    return {
+      events: artistEvents.length,
+      releases: artistTracks.length,
+      paidTickets: artistEvents.reduce((sum, event) => sum + event.paidTickets, 0),
+      pendingTickets: artistEvents.reduce((sum, event) => sum + event.pendingTickets, 0),
+      revenueCents: artistEvents.reduce((sum, event) => sum + event.revenueCents, 0),
+    };
+  }, [artistEvents, artistTracks.length, user?.role]);
   const activeSalesEvent =
     artistEvents.find((item) => item.id === selectedSalesEventId) ?? artistEvents[0];
   const selectedCheckoutCategory = checkoutEvent?.ticketCategories.find(
@@ -2662,11 +2780,19 @@ export default function HomePage() {
       >
         <div className="sidebar-aura" aria-hidden="true" />
         <header className="sidebar-header">
-          <a href="#home" className="brand" aria-label="Wiloplay home" onClick={() => setMobileNav(false)}>
+          <a
+            href="#dashboard"
+            className="brand"
+            aria-label="Wiloplay dashboard"
+            onClick={(event) => {
+              event.preventDefault();
+              jumpToSection("dashboard");
+            }}
+          >
             <span className="brand-mark"><AudioLines size={18} strokeWidth={2.25} /></span>
             <span className="brand-copy">
               <strong>wiloplay<span className="brand-dot">.</span></strong>
-              <small>Listen in</small>
+              <small>Dashboard</small>
             </span>
           </a>
           <button className="sidebar-close" type="button" aria-label="Close menu" onClick={() => setMobileNav(false)}>
@@ -2689,9 +2815,21 @@ export default function HomePage() {
           <section className="sidebar-section">
             <p className="nav-caption">Explore</p>
             <nav className="side-nav" aria-label="Main navigation">
-              <a className={`nav-link ${activeNav === "home" ? "active" : ""}`} aria-current={activeNav === "home" ? "location" : undefined} href="#home" onClick={() => setMobileNav(false)}>
+              <a
+                className={`nav-link ${activeNav === "home" ? "active" : ""}`}
+                aria-current={activeNav === "home" ? "location" : undefined}
+                href="#dashboard"
+                onClick={(event) => {
+                  event.preventDefault();
+                  jumpToSection("dashboard");
+                }}
+              >
+                <span className="nav-ico"><LayoutDashboard size={16} /></span>
+                <span className="nav-label">Dashboard</span>
+              </a>
+              <a className="nav-link" href="/" onClick={() => setMobileNav(false)}>
                 <span className="nav-ico"><Home size={16} /></span>
-                <span className="nav-label">Home</span>
+                <span className="nav-label">Homepage</span>
               </a>
               <a
                 className={`nav-link ${activeNav === "discovery" ? "active" : ""}`}
@@ -2763,6 +2901,34 @@ export default function HomePage() {
             </div>
           </section>
 
+          {user?.role === "ARTIST" && (
+            <section className="sidebar-section">
+              <p className="nav-caption">Artist studio</p>
+              <div className="sidebar-stack">
+                <button type="button" className="library-link" onClick={() => jumpToSection("dashboard")}>
+                  <span className="nav-ico"><LayoutDashboard size={15} /></span>
+                  <span>Studio overview</span>
+                </button>
+                <button type="button" className="library-link" onClick={() => jumpToSection("ticket-sales")}>
+                  <span className="nav-ico"><BarChart3 size={15} /></span>
+                  <span>Ticket sales</span>
+                </button>
+                <button type="button" className="library-link" onClick={() => { setMobileNav(false); openEventWizard(); }}>
+                  <span className="nav-ico"><CalendarDays size={15} /></span>
+                  <span>Sell tickets</span>
+                </button>
+                <button type="button" className="library-link" onClick={() => { setMobileNav(false); openUploadWizard(); }}>
+                  <span className="nav-ico"><Upload size={15} /></span>
+                  <span>Upload music</span>
+                </button>
+                <button type="button" className="library-link" onClick={() => jumpToSection("artist-music")}>
+                  <span className="nav-ico"><Disc3 size={15} /></span>
+                  <span>Manage releases</span>
+                </button>
+              </div>
+            </section>
+          )}
+
           <section className="sidebar-section">
             <p className="nav-caption">Account</p>
             <div className="sidebar-stack">
@@ -2770,6 +2936,12 @@ export default function HomePage() {
                 <span className="nav-ico"><UserRound size={15} /></span>
                 <span>{user ? "My profile" : "Sign in"}</span>
               </button>
+              {user && user.role !== "ARTIST" && (
+                <button type="button" className="library-link" onClick={() => jumpToSection("dashboard")}>
+                  <span className="nav-ico"><LayoutDashboard size={15} /></span>
+                  <span>My dashboard</span>
+                </button>
+              )}
               <button type="button" className="library-link" onClick={openSettings}>
                 <span className="nav-ico"><Settings size={15} /></span>
                 <span>Settings</span>
@@ -2816,6 +2988,22 @@ export default function HomePage() {
         <header className="topbar">
           <div className="topbar-left">
             <button className="icon-btn mobile-menu" aria-label="Open menu" onClick={() => setMobileNav(!mobileNav)}><Menu size={19} /></button>
+            <a
+              href="#dashboard"
+              className="topbar-brand"
+              aria-label="Go to dashboard"
+              onClick={(event) => {
+                event.preventDefault();
+                jumpToSection("dashboard");
+              }}
+            >
+              <span className="brand-mark"><AudioLines size={16} strokeWidth={2.25} /></span>
+              <span>wiloplay<span className="brand-dot">.</span></span>
+            </a>
+            <a href="/" className="topbar-home-link" aria-label="Open Wiloplay homepage">
+              <Home size={14} />
+              <span>Homepage</span>
+            </a>
             <button className="icon-btn top-arrow" aria-label="Go back" onClick={() => window.history.back()}><ArrowLeft size={17} /></button>
             <button className="icon-btn top-arrow" aria-label="Go forward" onClick={() => window.history.forward()}><ArrowRight size={17} /></button>
             <div className="search-shell">
@@ -2886,11 +3074,17 @@ export default function HomePage() {
                     <ChevronDown className="artist-studio-chevron" size={14} />
                   </summary>
                   <div className="artist-studio-dropdown">
+                    <button onClick={(event) => { event.currentTarget.closest("details")?.removeAttribute("open"); jumpToSection("dashboard"); }}>
+                      <LayoutDashboard size={16} /><span><strong>Studio overview</strong><small>Tickets, music, and stats</small></span><ArrowRight size={14} />
+                    </button>
                     <a href={`/artist/${encodeURIComponent(user.id)}`} onClick={(event) => event.currentTarget.closest("details")?.removeAttribute("open")}>
-                      <Users size={16} /><span><strong>Profile &amp; audience</strong><small>Fans, listens, and cities</small></span><ArrowRight size={14} />
+                      <Users size={16} /><span><strong>Audience analytics</strong><small>Fans, listens, and cities</small></span><ArrowRight size={14} />
                     </a>
-                    <button onClick={(event) => { event.currentTarget.closest("details")?.removeAttribute("open"); document.getElementById("ticket-sales")?.scrollIntoView({ behavior: "smooth" }); }}>
-                      <ScanLine size={16} /><span><strong>Ticket sales</strong><small>Bookings and check-in</small></span><ArrowRight size={14} />
+                    <button onClick={(event) => { event.currentTarget.closest("details")?.removeAttribute("open"); jumpToSection("ticket-sales"); }}>
+                      <BarChart3 size={16} /><span><strong>Ticket sales</strong><small>Bookings and check-in</small></span><ArrowRight size={14} />
+                    </button>
+                    <button onClick={(event) => { event.currentTarget.closest("details")?.removeAttribute("open"); openEventWizard(); }}>
+                      <Ticket size={16} /><span><strong>Sell tickets</strong><small>Create a live event</small></span><ArrowRight size={14} />
                     </button>
                     <button onClick={(event) => { event.currentTarget.closest("details")?.removeAttribute("open"); openUploadWizard(); }}>
                       <Upload size={16} /><span><strong>Upload release</strong><small>Share a new track</small></span><ArrowRight size={14} />
@@ -3002,6 +3196,86 @@ export default function HomePage() {
             </div>
             <div className="hero-bottom"><span>01 — YOUR DAILY RESET</span><span>MADE FOR THE MOMENT YOU&apos;RE IN <span className="hero-bottom-dash">↗</span></span></div>
           </section>
+
+          {user && (
+            <section className="section dashboard-hub" id="dashboard">
+              <div className="section-heading">
+                <div>
+                  <span className="section-kicker">{user.role === "ARTIST" ? "ARTIST STUDIO" : "YOUR DASHBOARD"}</span>
+                  <h2>{user.role === "ARTIST" ? "Run your music business." : "Everything you need, close by."}</h2>
+                  <p>{user.role === "ARTIST"
+                    ? "Sell tickets, check sales, manage releases, and see how your audience is growing."
+                    : "Find shows, keep your tickets, and get back to the music you love."}</p>
+                </div>
+                <button className="text-link" type="button" onClick={openSettings}>Account settings <ArrowRight size={15} /></button>
+              </div>
+
+              {user.role === "ARTIST" && artistDashboardStats && (
+                <div className="dashboard-metrics" aria-label="Artist overview">
+                  <article><span>Paid tickets</span><strong>{artistDashboardStats.paidTickets}</strong></article>
+                  <article><span>Pending</span><strong>{artistDashboardStats.pendingTickets}</strong></article>
+                  <article><span>Artist revenue</span><strong>{formatPrice(artistDashboardStats.revenueCents)}</strong></article>
+                  <article><span>Releases</span><strong>{artistDashboardStats.releases}</strong></article>
+                  <article><span>Events</span><strong>{artistDashboardStats.events}</strong></article>
+                </div>
+              )}
+
+              {user.role !== "ARTIST" && (
+                <div className="dashboard-metrics" aria-label="Listener overview">
+                  <article><span>Active tickets</span><strong>{activeTicketOrders.length}</strong></article>
+                  <article><span>Liked songs</span><strong>{likedTracks.length}</strong></article>
+                  <article><span>Playlists</span><strong>{playlists.length}</strong></article>
+                  <article><span>Upcoming shows</span><strong>{upcomingEvents.length}</strong></article>
+                </div>
+              )}
+
+              <div className="dashboard-actions">
+                {user.role === "ARTIST" ? <>
+                  <button type="button" className="dashboard-action" onClick={() => jumpToSection("ticket-sales")}>
+                    <span className="dashboard-action-icon"><BarChart3 size={18} /></span>
+                    <span><strong>Ticket sales &amp; analytics</strong><small>Revenue, bookings, and door check-in</small></span>
+                    <ArrowRight size={15} />
+                  </button>
+                  <button type="button" className="dashboard-action" onClick={openEventWizard}>
+                    <span className="dashboard-action-icon"><Ticket size={18} /></span>
+                    <span><strong>Sell tickets</strong><small>Create a show and open sales</small></span>
+                    <ArrowRight size={15} />
+                  </button>
+                  <button type="button" className="dashboard-action" onClick={openUploadWizard}>
+                    <span className="dashboard-action-icon"><Upload size={18} /></span>
+                    <span><strong>Upload music</strong><small>Share a single or album</small></span>
+                    <ArrowRight size={15} />
+                  </button>
+                  <a className="dashboard-action" href={`/artist/${encodeURIComponent(user.id)}`}>
+                    <span className="dashboard-action-icon"><Users size={18} /></span>
+                    <span><strong>Audience insights</strong><small>Followers, listens, and city trends</small></span>
+                    <ArrowRight size={15} />
+                  </a>
+                </> : <>
+                  <button type="button" className="dashboard-action" onClick={() => jumpToSection("my-tickets")}>
+                    <span className="dashboard-action-icon"><QrCode size={18} /></span>
+                    <span><strong>My tickets</strong><small>Bookings and entry QR codes</small></span>
+                    <ArrowRight size={15} />
+                  </button>
+                  <button type="button" className="dashboard-action" onClick={() => jumpToSection("shows")}>
+                    <span className="dashboard-action-icon"><CalendarDays size={18} /></span>
+                    <span><strong>Find live shows</strong><small>Browse and buy tickets</small></span>
+                    <ArrowRight size={15} />
+                  </button>
+                  <button type="button" className="dashboard-action" onClick={() => jumpToSection("library")}>
+                    <span className="dashboard-action-icon"><Heart size={18} /></span>
+                    <span><strong>Your library</strong><small>Liked songs, history, playlists</small></span>
+                    <ArrowRight size={15} />
+                  </button>
+                  <button type="button" className="dashboard-action" onClick={() => void becomeArtist()}>
+                    <span className="dashboard-action-icon"><Mic2 size={18} /></span>
+                    <span><strong>Become an artist</strong><small>Sell tickets and release music</small></span>
+                    <ArrowRight size={15} />
+                  </button>
+                </>}
+              </div>
+            </section>
+          )}
 
           <section className="section discovery-section" id="discovery">
             <div className="section-heading">
@@ -3386,7 +3660,15 @@ export default function HomePage() {
         {!queue.length && !shownTracks.some((track) => track.preview || track.audioUrl) && <p className="queue-empty">Start a track to build your queue.</p>}
       </aside>}
 
-      {notice && <div className="toast" role="status"><span><Check size={15} /></span>{notice}<button onClick={() => setNotice("")} aria-label="Dismiss"><X size={14} /></button></div>}
+      {notice && (
+        <div className="toast-stack" aria-live="polite">
+          <div className="toast toast-success is-visible" role="status">
+            <span className="toast-icon"><Check size={15} /></span>
+            <p className="toast-copy">{notice}</p>
+            <button className="toast-dismiss" onClick={() => setNotice("")} aria-label="Dismiss"><X size={14} /></button>
+          </div>
+        </div>
+      )}
 
       {playlistDialog && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !libraryBusy) { setPlaylistDialog(null); setLibraryError(""); } }}>
         <section className="modal-card playlist-dialog" role="dialog" aria-modal="true" aria-labelledby="playlist-dialog-heading">
@@ -3407,7 +3689,7 @@ export default function HomePage() {
       </div>}
 
       {modal && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeModal(); }}>
-        <section key={modal} className={`modal-card${modal === "upload" || modal === "event" ? " wizard-modal" : ""}${modal === "login" || modal === "signup" || modal === "forgot-password" || modal === "reset-password" || modal === "email-verification" || modal === "settings" ? " auth-modal" : ""}`} role="dialog" aria-modal="true" aria-labelledby="modal-heading">
+        <section key={modal} className={`modal-card${modal === "upload" || modal === "event" ? " wizard-modal" : ""}${modal === "login" || modal === "signup" || modal === "forgot-password" || modal === "reset-password" || modal === "email-verification" || modal === "settings" ? " auth-modal" : ""}${modal === "email-verification" ? " email-verify-modal" : ""}${modal === "forgot-password" || modal === "reset-password" ? " reset-password-modal" : ""}${modal === "settings" ? " settings-modal" : ""}`} role="dialog" aria-modal="true" aria-labelledby="modal-heading">
           <button className="modal-close" aria-label="Close dialog" onClick={closeModal}><X size={18} /></button>
           {(modal === "login" || modal === "signup") ? <>
             <div className="auth-modal-hero">
@@ -3442,25 +3724,61 @@ export default function HomePage() {
               <p className="auth-legal-links"><a href="/terms" target="_blank" rel="noreferrer">Terms and Conditions</a><span>·</span><a href="/privacy" target="_blank" rel="noreferrer">Privacy Policy</a></p>
             </div>
           </> : modal === "forgot-password" ? <>
-            <div className="auth-modal-body auth-modal-body-solo">
-              <div className="modal-logo"><AudioLines size={21} /></div>
-              <span className="section-kicker">ACCOUNT RECOVERY</span><h2 id="modal-heading">Reset your password.</h2>
-              <p className="modal-subtitle">Enter the email on your account. We&apos;ll send a six-digit code if it matches. You can also use this to resend a password reset code.</p>
-              <form className="modal-form" onSubmit={(event) => void submitForgotPassword(event)}>
+            <div className="auth-modal-body auth-modal-body-solo reset-password-body">
+              <div className="reset-password-hero">
+                <div className="email-verify-icon" aria-hidden="true"><KeyRound size={22} /></div>
+                <span className="section-kicker">ACCOUNT RECOVERY</span>
+                <h2 id="modal-heading">Reset your password</h2>
+                <p className="modal-subtitle">Enter the email on your account. We&apos;ll send a 6-digit code if it matches.</p>
+              </div>
+              <form className="modal-form reset-password-form" onSubmit={(event) => void submitForgotPassword(event)}>
                 <label>Email address<input name="email" type="email" autoComplete="email" placeholder="you@somewhere.com" value={authDraft.email} onChange={(event) => setAuthDraft((draft) => ({ ...draft, email: event.target.value }))} required /></label>
                 {error && <div className="form-error" role="alert">{error}</div>}
                 <button className="form-submit" disabled={busy || !authDraft.email.trim()}>{busy ? "Sending..." : "Send reset code"} <ArrowRight size={15} /></button>
               </form>
-              <div className="auth-link-row"><button type="button" onClick={() => { setAuthMode("login"); setModal("login"); setError(""); }}>Back to log in</button><button type="button" onClick={() => { setAuthMode("signup"); setModal("signup"); setError(""); }}>Create an account</button></div>
-              <p className="auth-legal-links"><a href="/terms" target="_blank" rel="noreferrer">Terms and Conditions</a><span>·</span><a href="/privacy" target="_blank" rel="noreferrer">Privacy Policy</a></p>
+              <div className="auth-link-row email-verify-actions">
+                <button type="button" onClick={() => { setAuthMode("login"); setModal("login"); setError(""); }}>Back to log in</button>
+                <button type="button" onClick={() => { setAuthMode("signup"); setModal("signup"); setError(""); }}>Create an account</button>
+              </div>
+              <p className="auth-legal-links"><a href="/terms" target="_blank" rel="noreferrer">Terms</a><span>·</span><a href="/privacy" target="_blank" rel="noreferrer">Privacy</a></p>
             </div>
           </> : modal === "reset-password" ? <>
-            <div className="auth-modal-body auth-modal-body-solo">
-              <div className="modal-logo"><AudioLines size={21} /></div>
-              <span className="section-kicker">CHOOSE A NEW PASSWORD</span><h2 id="modal-heading">Almost there.</h2>
-              <p className="modal-subtitle">Enter the code sent to <strong>{verificationEmail}</strong> and pick a new password. Codes expire in {Math.max(1, Math.ceil(resetExpiresInSeconds / 60))} minutes.</p>
-              <form className="modal-form" onSubmit={(event) => void submitResetPassword(event)}>
-                <label>Reset code<input className="email-verification-code" name="code" type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} placeholder="000000" value={resetCode} onChange={(event) => setResetCode(event.target.value.replace(/\D/g, "").slice(0, 6))} required /></label>
+            <div className="auth-modal-body auth-modal-body-solo reset-password-body">
+              <div className="reset-password-hero">
+                <div className="email-verify-icon" aria-hidden="true"><KeyRound size={22} /></div>
+                <span className="section-kicker">CHOOSE A NEW PASSWORD</span>
+                <h2 id="modal-heading">Almost there</h2>
+                <p className="modal-subtitle">Enter the code we sent, then set a new password.</p>
+                <div className="email-verify-meta">
+                  <span className="email-verify-chip" title={verificationEmail}>{maskEmailAddress(verificationEmail)}</span>
+                  <span className="email-verify-chip email-verify-chip-soft">Expires in {Math.max(1, Math.ceil(resetExpiresInSeconds / 60))} min</span>
+                </div>
+              </div>
+              <form className="modal-form reset-password-form" onSubmit={(event) => void submitResetPassword(event)}>
+                <div className="email-verify-otp" role="group" aria-label="Reset code">
+                  {Array.from({ length: 6 }, (_, index) => (
+                    <input
+                      key={index}
+                      ref={(node) => { resetOtpRefs.current[index] = node; }}
+                      className="email-verify-otp-input"
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete={index === 0 ? "one-time-code" : "off"}
+                      aria-label={`Digit ${index + 1}`}
+                      maxLength={6}
+                      value={resetCode[index] ?? ""}
+                      onChange={(event) => updateResetOtpDigit(index, event.target.value)}
+                      onKeyDown={(event) => handleResetOtpKeyDown(index, event.key)}
+                      onFocus={(event) => event.currentTarget.select()}
+                      onPaste={(event) => {
+                        event.preventDefault();
+                        setResetOtpValue(event.clipboardData.getData("text"));
+                      }}
+                      disabled={busy}
+                    />
+                  ))}
+                </div>
+                <input type="hidden" name="code" value={resetCode} />
                 <label>New password
                   <span className="password-field">
                     <input id="reset-password" name="password" type={resetPasswordVisible ? "text" : "password"} autoComplete="new-password" placeholder="8+ chars, letter and number" value={resetPasswordDraft} onChange={(event) => setResetPasswordDraft(event.target.value)} minLength={8} required />
@@ -3470,38 +3788,95 @@ export default function HomePage() {
                 {error && <div className="form-error" role="alert">{error}</div>}
                 <button className="form-submit" disabled={busy || resetCode.length !== 6 || resetPasswordDraft.length < 8}>{busy ? "Saving..." : "Update password"} <ArrowRight size={15} /></button>
               </form>
-              <div className="auth-link-row"><button type="button" disabled={busy} onClick={() => { setModal("forgot-password"); setError(""); }}>Resend password reset code</button><button type="button" onClick={() => { setAuthMode("login"); setModal("login"); setError(""); }}>Back to log in</button></div>
+              <div className="auth-link-row email-verify-actions">
+                <button type="button" disabled={busy} onClick={() => { setModal("forgot-password"); setError(""); }}>Resend code</button>
+                <button type="button" onClick={() => { setAuthMode("login"); setModal("login"); setError(""); }}>Back to log in</button>
+              </div>
+              <p className="auth-legal-links"><a href="/terms" target="_blank" rel="noreferrer">Terms</a><span>·</span><a href="/privacy" target="_blank" rel="noreferrer">Privacy</a></p>
             </div>
           </> : modal === "email-verification" ? <>
-            <div className="auth-modal-body auth-modal-body-solo">
-              <div className="modal-logo"><AudioLines size={21} /></div>
-              <span className="section-kicker">CHECK YOUR INBOX</span><h2 id="modal-heading">Verify your email.</h2>
-              <p className="modal-subtitle">We sent a six-digit code to <strong>{verificationEmail}</strong>. It expires in {Math.max(1, Math.ceil(verificationExpiresInSeconds / 60))} minutes. Logging in again continues here until you verify.</p>
-              <form className="modal-form" onSubmit={(event) => void verifyEmail(event)}>
-                <label>Verification code<input className="email-verification-code" name="code" type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} placeholder="000000" value={verificationCode} onChange={(event) => setVerificationCode(event.target.value.replace(/\D/g, "").slice(0, 6))} required /></label>
+            <div className="auth-modal-body auth-modal-body-solo email-verify-body">
+              <div className="email-verify-hero">
+                <div className="email-verify-icon" aria-hidden="true"><Mail size={22} /></div>
+                <span className="section-kicker">CHECK YOUR INBOX</span>
+                <h2 id="modal-heading">Verify your email</h2>
+                <p className="modal-subtitle">Enter the 6-digit code we sent you. Logging in again brings you back here until this is done.</p>
+                <div className="email-verify-meta">
+                  <span className="email-verify-chip" title={verificationEmail}>{maskEmailAddress(verificationEmail)}</span>
+                  <span className="email-verify-chip email-verify-chip-soft">Expires in {Math.max(1, Math.ceil(verificationExpiresInSeconds / 60))} min</span>
+                </div>
+              </div>
+              <form className="modal-form email-verify-form" onSubmit={(event) => void verifyEmail(event)}>
+                <div className="email-verify-otp" role="group" aria-label="Verification code">
+                  {Array.from({ length: 6 }, (_, index) => (
+                    <input
+                      key={index}
+                      ref={(node) => { verificationOtpRefs.current[index] = node; }}
+                      className="email-verify-otp-input"
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete={index === 0 ? "one-time-code" : "off"}
+                      aria-label={`Digit ${index + 1}`}
+                      maxLength={6}
+                      value={verificationCode[index] ?? ""}
+                      onChange={(event) => updateVerificationOtpDigit(index, event.target.value)}
+                      onKeyDown={(event) => handleVerificationOtpKeyDown(index, event.key)}
+                      onFocus={(event) => event.currentTarget.select()}
+                      onPaste={(event) => {
+                        event.preventDefault();
+                        setVerificationOtpValue(event.clipboardData.getData("text"));
+                      }}
+                      disabled={busy}
+                    />
+                  ))}
+                </div>
+                <input type="hidden" name="code" value={verificationCode} />
                 {error && <div className="form-error" role="alert">{error}</div>}
                 <button className="form-submit" disabled={busy || verificationCode.length !== 6}>{busy ? "Verifying..." : "Verify email"} <ArrowRight size={15} /></button>
               </form>
-              <div className="auth-link-row"><button type="button" disabled={busy} onClick={() => void resendEmailVerification()}>Resend verification code</button><button type="button" onClick={() => { setAuthMode("login"); setModal("login"); setError(""); }}>Back to log in</button></div>
-              <p className="auth-legal-links"><a href="/terms" target="_blank" rel="noreferrer">Terms and Conditions</a><span>·</span><a href="/privacy" target="_blank" rel="noreferrer">Privacy Policy</a></p>
+              <div className="auth-link-row email-verify-actions">
+                <button type="button" disabled={busy} onClick={() => void resendEmailVerification()}>Resend code</button>
+                <button type="button" onClick={() => { setAuthMode("login"); setModal("login"); setError(""); }}>Back to log in</button>
+              </div>
+              <p className="auth-legal-links"><a href="/terms" target="_blank" rel="noreferrer">Terms</a><span>·</span><a href="/privacy" target="_blank" rel="noreferrer">Privacy</a></p>
             </div>
           </> : modal === "settings" ? <>
-            <div className="auth-modal-body auth-modal-body-solo">
-              <div className="modal-logo"><Settings size={21} /></div>
-              <span className="section-kicker">YOUR ACCOUNT</span>
-              <h2 id="modal-heading">Profile &amp; settings.</h2>
-              <p className="modal-subtitle">Update how you show up on Wiloplay and manage account preferences.</p>
-              <div className="settings-summary">
-                <span className="avatar">{(user?.name ?? "W").slice(0, 1).toUpperCase()}</span>
-                <div>
+            <div className="auth-modal-body auth-modal-body-solo settings-body">
+              <div className="settings-hero">
+                <div className="settings-avatar" aria-hidden="true">{(user?.name ?? "W").slice(0, 1).toUpperCase()}</div>
+                <span className="section-kicker">YOUR ACCOUNT</span>
+                <h2 id="modal-heading">Profile &amp; settings</h2>
+                <p className="modal-subtitle">Keep your identity sharp and jump straight into the tools that matter.</p>
+                <div className="settings-identity">
                   <strong>{user?.name}</strong>
-                  <small>{user?.email}</small>
-                  <small>{user?.role === "ARTIST" ? "Artist account" : "Listener account"}{user?.emailVerifiedAt ? " · Verified" : ""}</small>
+                  <span>{user?.email}</span>
+                  <div className="settings-badges">
+                    <span className="settings-badge">{user?.role === "ARTIST" ? "Artist" : "Listener"}</span>
+                    {user?.emailVerifiedAt && <span className="settings-badge settings-badge-ok"><BadgeCheck size={12} /> Verified</span>}
+                  </div>
                 </div>
               </div>
-              <form className="modal-form auth-form" onSubmit={(event) => void submitSettings(event)}>
-                <label>Display name<input value={settingsName} onChange={(event) => setSettingsName(event.target.value)} maxLength={60} required /></label>
-                <label>City for trends <span className="wizard-optional">OPTIONAL</span><input value={cityDraft} onChange={(event) => setCityDraft(event.target.value)} placeholder="e.g. Lagos" maxLength={80} /></label>
+
+              <div className="settings-shortcuts" aria-label="Quick access">
+                {user?.role === "ARTIST" ? <>
+                  <button type="button" onClick={() => jumpToSection("dashboard")}><LayoutDashboard size={15} /><span>Studio overview</span></button>
+                  <button type="button" onClick={() => jumpToSection("ticket-sales")}><BarChart3 size={15} /><span>Ticket sales</span></button>
+                  <button type="button" onClick={() => { setModal(null); openEventWizard(); }}><Ticket size={15} /><span>Sell tickets</span></button>
+                  <a href={`/artist/${encodeURIComponent(user.id)}`}><Users size={15} /><span>Audience</span></a>
+                </> : <>
+                  <button type="button" onClick={() => jumpToSection("dashboard")}><LayoutDashboard size={15} /><span>Dashboard</span></button>
+                  <button type="button" onClick={() => jumpToSection("my-tickets")}><QrCode size={15} /><span>My tickets</span></button>
+                  <button type="button" onClick={() => jumpToSection("shows")}><CalendarDays size={15} /><span>Live shows</span></button>
+                  <button type="button" onClick={() => { setModal(null); void becomeArtist(); }}><Mic2 size={15} /><span>Become artist</span></button>
+                </>}
+              </div>
+
+              <form className="modal-form auth-form settings-form" onSubmit={(event) => void submitSettings(event)}>
+                <div className="settings-panel">
+                  <span className="settings-panel-label">Profile</span>
+                  <label>Display name<input value={settingsName} onChange={(event) => setSettingsName(event.target.value)} maxLength={60} required /></label>
+                  <label>City for trends <span className="wizard-optional">OPTIONAL</span><input value={cityDraft} onChange={(event) => setCityDraft(event.target.value)} placeholder="e.g. Lagos" maxLength={80} /></label>
+                </div>
                 <div className="settings-row">
                   <div><strong>Appearance</strong><small>Switch between light and dark mode</small></div>
                   <button className="theme-toggle" type="button" onClick={toggleTheme}>{theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}<span>{theme === "dark" ? "Light" : "Dark"}</span></button>
@@ -3509,11 +3884,11 @@ export default function HomePage() {
                 {error && <div className="form-error" role="alert">{error}</div>}
                 <button className="form-submit" type="submit">Save settings <ArrowRight size={15} /></button>
               </form>
-              <div className="auth-link-row">
+              <div className="auth-link-row settings-footer-links">
                 {user?.role === "ARTIST" && <a href={`/artist/${encodeURIComponent(user.id)}`}>Open artist profile</a>}
                 <button type="button" onClick={() => { closeModal(); logout(); }}>Sign out</button>
               </div>
-              <p className="auth-legal-links"><a href="/terms" target="_blank" rel="noreferrer">Terms and Conditions</a><span>·</span><a href="/privacy" target="_blank" rel="noreferrer">Privacy Policy</a></p>
+              <p className="auth-legal-links"><a href="/terms" target="_blank" rel="noreferrer">Terms</a><span>·</span><a href="/privacy" target="_blank" rel="noreferrer">Privacy</a></p>
             </div>
           </> : modal === "upload" ? <>
             <div className="modal-logo"><AudioLines size={21} /></div>

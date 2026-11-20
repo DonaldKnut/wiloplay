@@ -235,8 +235,8 @@ export class EventsService {
     });
     if (!event) throw new NotFoundException("Event not found.");
 
-    const attendees = [...new Map(
-      event.orders.map((order) => [order.user.email, order.user]),
+    const attendees: { email: string; name: string }[] = [...new Map(
+      event.orders.map((order) => [order.user.email, order.user] as const),
     ).values()];
     if (!attendees.length) {
       return { recipientCount: 0, sentCount: 0, failedCount: 0 };
